@@ -60,16 +60,16 @@ measurement column.  Typical sensors for the M2 buoy:
 
 | Entity ID | Description | Unit |
 |-----------|-------------|------|
-| `sensor.m2_buoy_significant_wave_height` | Hm0 | m |
-| `sensor.m2_buoy_peak_wave_period` | Tp | s |
-| `sensor.m2_buoy_mean_wave_direction` | ° | ° |
-| `sensor.m2_buoy_sea_temperature` | °C | °C |
-| `sensor.m2_buoy_air_temperature` | °C | °C |
-| `sensor.m2_buoy_wind_speed` | m/s | m/s |
-| `sensor.m2_buoy_wind_gust` | m/s | m/s |
-| `sensor.m2_buoy_wind_direction` | ° | ° |
-| `sensor.m2_buoy_atmospheric_pressure` | hPa | hPa |
-| `sensor.m2_buoy_dew_point` | °C | °C |
+| `sensor.m2_buoy_significant_wave_height` | Significant wave height (Hm0) | m |
+| `sensor.m2_buoy_peak_wave_period` | Peak wave period (Tp) | s |
+| `sensor.m2_buoy_mean_wave_direction` | Mean wave direction | ° |
+| `sensor.m2_buoy_sea_temperature` | Sea surface temperature | °C |
+| `sensor.m2_buoy_air_temperature` | Air temperature | °C |
+| `sensor.m2_buoy_wind_speed` | Wind speed | m/s |
+| `sensor.m2_buoy_wind_gust` | Wind gust speed | m/s |
+| `sensor.m2_buoy_wind_direction` | Wind direction | ° |
+| `sensor.m2_buoy_atmospheric_pressure` | Atmospheric pressure | hPa |
+| `sensor.m2_buoy_dew_point` | Dew point temperature | °C |
 
 Any column not listed in `const.py → SENSOR_METADATA` still gets a sensor —
 it just won't have units or a device class attached.
