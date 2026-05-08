@@ -308,50 +308,57 @@ class TidalPredictor:
         Return a dict summarising the tidal state at dt.
 
         Keys:
-          height            float  metres above Chart Datum
-          state             str    "Rising" | "Falling"
-          next_high_time    datetime (UTC) | None
-          next_high_height  float | None
-          next_low_time     datetime (UTC) | None
-          next_low_height   float | None
-          minutes_to_high   int | None
-          minutes_to_low    int | None
-          port              str    port name
-          mhws              float  Mean High Water Springs (m CD)
-          mlws              float  Mean Low Water Springs (m CD)
+          height              float  metres above Chart Datum
+          state               str    "Rising" | "Falling"
+          next_high_time      datetime (UTC) | None
+          next_high_height    float | None
+          next_low_time       datetime (UTC) | None
+          next_low_height     float | None
+          minutes_to_high     int | None
+          minutes_to_low      int | None
+          minutes_since_high  int | None  (minutes since most recent past high)
+          port                str    port name
+          mhws                float  Mean High Water Springs (m CD)
+          mlws                float  Mean Low Water Springs (m CD)
         """
         dt = dt.astimezone(timezone.utc)
         current_height = self.height(dt)
         rising = self._dheight_dt(dt) > 0
 
         # Search window: start 7 hours back so we always capture the
-        # most recent past extremum as well as upcoming ones.
+        # most recent past high as well as upcoming ones.
         extrema = self.find_extrema(dt - timedelta(hours=7), count=8)
 
-        next_high: TidalExtremum | None = None
-        next_low:  TidalExtremum | None = None
+        past_high:  TidalExtremum | None = None
+        next_high:  TidalExtremum | None = None
+        next_low:   TidalExtremum | None = None
         for ex in extrema:
-            if ex.time > dt:
+            if ex.time <= dt:
+                if ex.kind == "high":
+                    past_high = ex   # keep updating — last one wins (most recent)
+            else:
                 if ex.kind == "high" and next_high is None:
                     next_high = ex
                 elif ex.kind == "low" and next_low is None:
                     next_low = ex
-            if next_high and next_low:
-                break
 
-        def _mins(ex: TidalExtremum | None) -> int | None:
+        def _mins_to(ex: TidalExtremum | None) -> int | None:
             return None if ex is None else round((ex.time - dt).total_seconds() / 60)
 
+        def _mins_since(ex: TidalExtremum | None) -> int | None:
+            return None if ex is None else round((dt - ex.time).total_seconds() / 60)
+
         return {
-            "height":           current_height,
-            "state":            "Rising" if rising else "Falling",
-            "next_high_time":   next_high.time   if next_high else None,
-            "next_high_height": next_high.height if next_high else None,
-            "next_low_time":    next_low.time    if next_low  else None,
-            "next_low_height":  next_low.height  if next_low  else None,
-            "minutes_to_high":  _mins(next_high),
-            "minutes_to_low":   _mins(next_low),
-            "port":             self._port.name,
-            "mhws":             self._port.mhws,
-            "mlws":             self._port.mlws,
+            "height":             current_height,
+            "state":              "Rising" if rising else "Falling",
+            "next_high_time":     next_high.time   if next_high else None,
+            "next_high_height":   next_high.height if next_high else None,
+            "next_low_time":      next_low.time    if next_low  else None,
+            "next_low_height":    next_low.height  if next_low  else None,
+            "minutes_to_high":    _mins_to(next_high),
+            "minutes_to_low":     _mins_to(next_low),
+            "minutes_since_high": _mins_since(past_high),
+            "port":               self._port.name,
+            "mhws":               self._port.mhws,
+            "mlws":               self._port.mlws,
         }

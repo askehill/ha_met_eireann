@@ -12,8 +12,11 @@ DEFAULT_UPDATE_INTERVAL = 3600  # seconds (1 hour)
 CONF_BUOY_ID = "buoy_id"
 CONF_UPDATE_INTERVAL = "update_interval"  # custom key — avoids clash with HA's reserved 'scan_interval'
 CONF_TIDE_PORT = "tide_port"
+CONF_SWIM_WAVE_THRESHOLD = "swim_wave_threshold"
 
-DEFAULT_TIDE_UPDATE_INTERVAL = 300  # seconds (5 minutes) — pure local computation
+DEFAULT_TIDE_UPDATE_INTERVAL = 300   # seconds (5 minutes) — pure local computation
+DEFAULT_SWIM_WAVE_THRESHOLD  = 1.0   # metres — Hm0 above this is considered too rough
+SWIM_TIDE_WINDOW_MINUTES     = 90    # minutes either side of high tide
 
 # ---------------------------------------------------------------------------
 # Known column → (friendly name, unit_of_measurement, device_class, icon)

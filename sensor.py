@@ -25,14 +25,17 @@ from homeassistant.helpers.update_coordinator import (
 
 from .const import (
     CONF_BUOY_ID,
+    CONF_SWIM_WAVE_THRESHOLD,
     CONF_TIDE_PORT,
     CONF_UPDATE_INTERVAL,
     DEFAULT_BUOY_ID,
     DEFAULT_NAME,
+    DEFAULT_SWIM_WAVE_THRESHOLD,
     DEFAULT_TIDE_UPDATE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     SENSOR_METADATA,
+    SWIM_TIDE_WINDOW_MINUTES,
 )
 from .coordinator import MetIeBuoyCoordinator
 from .tides import PORTS, TidalPredictor
@@ -48,6 +51,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
         vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): cv.positive_int,
         vol.Optional(CONF_TIDE_PORT): vol.In(list(PORTS.keys())),
+        vol.Optional(CONF_SWIM_WAVE_THRESHOLD, default=DEFAULT_SWIM_WAVE_THRESHOLD): vol.Coerce(float),
     }
 )
 
@@ -81,6 +85,7 @@ async def async_setup_platform(
     platform_name: str = config[CONF_NAME]
     update_interval: int = config[CONF_UPDATE_INTERVAL]
     tide_port_key: str | None = config.get(CONF_TIDE_PORT)
+    swim_wave_threshold: float = config[CONF_SWIM_WAVE_THRESHOLD]
 
     # ── Buoy sensors ────────────────────────────────────────────────────────
     buoy_coordinator = MetIeBuoyCoordinator(hass, buoy_id, update_interval)
@@ -135,7 +140,14 @@ async def async_setup_platform(
             TideHeightSensor(tide_coordinator, tide_prefix, buoy_id, tide_port_key),
             TideStateSensor(tide_coordinator, tide_prefix, buoy_id, tide_port_key),
             TideNextHighSensor(tide_coordinator, tide_prefix, buoy_id, tide_port_key),
+            TideNextHighTimeSensor(tide_coordinator, tide_prefix, buoy_id, tide_port_key),
             TideNextLowSensor(tide_coordinator, tide_prefix, buoy_id, tide_port_key),
+            TideNextLowTimeSensor(tide_coordinator, tide_prefix, buoy_id, tide_port_key),
+            SwimConditionSensor(
+                tide_coordinator, buoy_coordinator,
+                tide_prefix, buoy_id, tide_port_key,
+                swim_wave_threshold,
+            ),
         ]
 
     async_add_entities(entities, update_before_add=False)
@@ -397,4 +409,173 @@ class TideNextLowSensor(_TideSensorBase):
             "low_tide_time":   low_time.isoformat() if low_time else None,
             "low_tide_height": t.get("next_low_height"),
             "port":            t.get("port"),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Next high tide TIME sensor
+# ---------------------------------------------------------------------------
+
+class TideNextHighTimeSensor(_TideSensorBase):
+    """Timestamp of the next high tide."""
+
+    _attr_icon = "mdi:wave-arrow-up"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator, prefix, buoy_id, port_key):
+        super().__init__(
+            coordinator, prefix, buoy_id, port_key,
+            suffix="Next High Time", unique_suffix="next_high_time",
+        )
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self._tide.get("next_high_time")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        t = self._tide
+        return {
+            "high_tide_height": t.get("next_high_height"),
+            "port":             t.get("port"),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Next low tide TIME sensor
+# ---------------------------------------------------------------------------
+
+class TideNextLowTimeSensor(_TideSensorBase):
+    """Timestamp of the next low tide."""
+
+    _attr_icon = "mdi:wave-arrow-down"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator, prefix, buoy_id, port_key):
+        super().__init__(
+            coordinator, prefix, buoy_id, port_key,
+            suffix="Next Low Time", unique_suffix="next_low_time",
+        )
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self._tide.get("next_low_time")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        t = self._tide
+        return {
+            "low_tide_height": t.get("next_low_height"),
+            "port":            t.get("port"),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Swim condition sensor
+# ---------------------------------------------------------------------------
+
+class SwimConditionSensor(_TideSensorBase):
+    """
+    Indicates whether conditions are good for a swim.
+
+    "Good"  — within SWIM_TIDE_WINDOW_MINUTES of high tide AND wave height
+              at or below the configured threshold.
+    "Poor"  — either condition not met.
+    "Unknown" — wave height data not yet available from the buoy.
+
+    Reads tide data from the TideCoordinator and wave height from the
+    MetIeBuoyCoordinator (the `height` CSV column).
+    """
+
+    _attr_icon = "mdi:swim"
+
+    def __init__(
+        self,
+        tide_coordinator: TideCoordinator,
+        buoy_coordinator: MetIeBuoyCoordinator,
+        prefix: str,
+        buoy_id: str,
+        port_key: str,
+        wave_threshold: float,
+    ) -> None:
+        super().__init__(
+            tide_coordinator, prefix, buoy_id, port_key,
+            suffix="Swim Condition", unique_suffix="swim_condition",
+        )
+        self._buoy_coordinator = buoy_coordinator
+        self._wave_threshold = wave_threshold
+
+    # Subscribe to both coordinators so the entity refreshes when either updates
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self._buoy_coordinator.async_add_listener(self.async_write_ha_state)
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def _wave_height(self) -> float | None:
+        """Current significant wave height from the buoy CSV (metres)."""
+        data = self._buoy_coordinator.data or {}
+        raw = data.get("height")
+        if raw is None or str(raw).strip() in ("", "NaN", "N/A", "null", "NULL"):
+            return None
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            return None
+
+    @property
+    def _near_high_tide(self) -> bool:
+        """True if within SWIM_TIDE_WINDOW_MINUTES of the nearest high tide."""
+        t = self._tide
+        mins_to    = t.get("minutes_to_high")
+        mins_since = t.get("minutes_since_high")
+        approaching = mins_to    is not None and mins_to    <= SWIM_TIDE_WINDOW_MINUTES
+        just_passed = mins_since is not None and mins_since <= SWIM_TIDE_WINDOW_MINUTES
+        return approaching or just_passed
+
+    # ------------------------------------------------------------------
+    # State
+    # ------------------------------------------------------------------
+
+    @property
+    def native_value(self) -> str:
+        wave = self._wave_height
+
+        tide_ok = self._near_high_tide
+        wave_ok = wave is not None and wave <= self._wave_threshold
+
+        if wave is None:
+            return "Unknown"
+        return "Good" if (tide_ok and wave_ok) else "Poor"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        t = self._tide
+        wave = self._wave_height
+        mins_to    = t.get("minutes_to_high")
+        mins_since = t.get("minutes_since_high")
+
+        # Build a plain-English reason string
+        reasons: list[str] = []
+        if not self._near_high_tide:
+            if mins_to is not None:
+                reasons.append(f"high tide is {mins_to} min away (window is ±{SWIM_TIDE_WINDOW_MINUTES} min)")
+        if wave is not None and wave > self._wave_threshold:
+            reasons.append(f"waves {wave} m exceed threshold of {self._wave_threshold} m")
+        if wave is None:
+            reasons.append("wave height not available")
+
+        return {
+            "near_high_tide":       self._near_high_tide,
+            "minutes_to_high_tide": mins_to,
+            "minutes_since_high_tide": mins_since,
+            "wave_height_m":        wave,
+            "wave_threshold_m":     self._wave_threshold,
+            "reason":               "; ".join(reasons) if reasons else "all conditions met",
+            "port":                 t.get("port"),
         }
