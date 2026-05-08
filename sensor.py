@@ -53,7 +53,18 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 
 # Columns that are metadata / timestamps — skip creating sensors for these.
 # The "time" column is surfaced as an attribute on every buoy sensor.
-_SKIP_COLUMNS = {"time", "date", "datetime", "timestamp", "station", "buoy"}
+_SKIP_COLUMNS = {
+    # Identifiers
+    "id", "name", "wmoid", "wmoID",
+    "stationid", "station_id", "stationname", "station_name",
+    "buoyid", "buoy_id", "buoy", "station",
+    # Timestamps / audit fields
+    "time", "date", "datetime", "timestamp",
+    "reportdate", "reporttime",
+    "updated_at", "created_at",
+    # Location
+    "location", "latitude", "longitude", "lat", "lon",
+}
 
 # ---------------------------------------------------------------------------
 # Platform setup

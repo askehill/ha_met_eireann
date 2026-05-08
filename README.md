@@ -56,20 +56,26 @@ Table constants.  No extra API or internet access needed for tides.
 ## Buoy sensors
 
 The integration reads the CSV headers on first load and creates one sensor per
-measurement column.  Typical sensors for the M2 buoy:
+measurement column.  Sensors for the M2 buoy (column names confirmed from live data):
 
-| Entity ID | Description | Unit |
-|-----------|-------------|------|
-| `sensor.m2_buoy_significant_wave_height` | Significant wave height (Hm0) | m |
-| `sensor.m2_buoy_peak_wave_period` | Peak wave period (Tp) | s |
-| `sensor.m2_buoy_mean_wave_direction` | Mean wave direction | ° |
-| `sensor.m2_buoy_sea_temperature` | Sea surface temperature | °C |
-| `sensor.m2_buoy_air_temperature` | Air temperature | °C |
-| `sensor.m2_buoy_wind_speed` | Wind speed | m/s |
-| `sensor.m2_buoy_wind_gust` | Wind gust speed | m/s |
-| `sensor.m2_buoy_wind_direction` | Wind direction | ° |
-| `sensor.m2_buoy_atmospheric_pressure` | Atmospheric pressure | hPa |
-| `sensor.m2_buoy_dew_point` | Dew point temperature | °C |
+| Entity ID | CSV column | Description | Unit |
+|-----------|------------|-------------|------|
+| `sensor.m2_buoy_atmospheric_pressure` | `pressure` | Atmospheric pressure | hPa |
+| `sensor.m2_buoy_wind_direction` | `windDir` | Wind direction | ° |
+| `sensor.m2_buoy_wind_speed` | `windSpeed` | Wind speed | kn |
+| `sensor.m2_buoy_wind_gust` | `windGust` | Wind gust speed | kn |
+| `sensor.m2_buoy_wind_gust_direction` | `windGustDir` | Wind gust direction | ° |
+| `sensor.m2_buoy_air_temperature` | `temp` | Air temperature | °C |
+| `sensor.m2_buoy_dew_point` | `dewPoint` | Dew point temperature | °C |
+| `sensor.m2_buoy_relative_humidity` | `humidity` | Relative humidity | % |
+| `sensor.m2_buoy_significant_wave_height` | `height` | Significant wave height | m |
+| `sensor.m2_buoy_wave_peak_period` | `period` | Wave peak period | s |
+| `sensor.m2_buoy_wave_direction` | `waveDir` | Wave direction | ° |
+| `sensor.m2_buoy_sea_temperature` | `seaTemp` | Sea temperature | °C |
+
+> Wind speeds are reported in **knots** by Met.ie marine stations.
+> Some columns (e.g. `windGust`, `waveDir`) may show `unknown` in HA when the
+> buoy hasn't reported a value for that reading.
 
 Any column not listed in `const.py → SENSOR_METADATA` still gets a sensor —
 it just won't have units or a device class attached.

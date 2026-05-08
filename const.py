@@ -22,29 +22,42 @@ DEFAULT_TIDE_UPDATE_INTERVAL = 300  # seconds (5 minutes) — pure local computa
 # just without units / device class.
 # ---------------------------------------------------------------------------
 SENSOR_METADATA: dict[str, tuple[str, str | None, str | None, str]] = {
+    # ── Actual Met.ie CSV column names (confirmed from live data) ────────────
     # Atmospheric
-    "AtmPressure":      ("Atmospheric Pressure",    "hPa",   "atmospheric_pressure", "mdi:gauge"),
-    # Wind
-    "WindSpeed":        ("Wind Speed",              "m/s",   "wind_speed",            "mdi:weather-windy"),
-    "WindGust":         ("Wind Gust",               "m/s",   "wind_speed",            "mdi:weather-windy"),
-    "WindDirection":    ("Wind Direction",           "°",     None,                    "mdi:compass-rose"),
-    "Gust_Dir":         ("Gust Direction",           "°",     None,                    "mdi:compass-rose"),
+    "pressure":     ("Atmospheric Pressure",    "hPa",  "atmospheric_pressure", "mdi:gauge"),
+    # Wind  (speeds reported in knots by Met.ie marine stations)
+    "windSpeed":    ("Wind Speed",              "kn",   "wind_speed",           "mdi:weather-windy"),
+    "windGust":     ("Wind Gust",               "kn",   "wind_speed",           "mdi:weather-windy"),
+    "windDir":      ("Wind Direction",          "°",    None,                   "mdi:compass-rose"),
+    "windGustDir":  ("Wind Gust Direction",     "°",    None,                   "mdi:compass-rose"),
     # Temperature
-    "AirTemperature":   ("Air Temperature",         "°C",    "temperature",           "mdi:thermometer"),
-    "AirTemp":          ("Air Temperature",         "°C",    "temperature",           "mdi:thermometer"),
-    "DewPoint":         ("Dew Point",               "°C",    "temperature",           "mdi:thermometer-water"),
-    "SeaTemperature":   ("Sea Temperature",         "°C",    "temperature",           "mdi:thermometer"),
-    "SeaTemp":          ("Sea Temperature",         "°C",    "temperature",           "mdi:thermometer"),
+    "temp":         ("Air Temperature",         "°C",   "temperature",          "mdi:thermometer"),
+    "dewPoint":     ("Dew Point",               "°C",   "temperature",          "mdi:thermometer-water"),
+    "humidity":     ("Relative Humidity",       "%",    "humidity",             "mdi:water-percent"),
+    "seaTemp":      ("Sea Temperature",         "°C",   "temperature",          "mdi:thermometer"),
     # Waves
-    "Hm0":              ("Significant Wave Height", "m",     None,                    "mdi:waves"),
-    "Tp":               ("Peak Wave Period",         "s",     None,                    "mdi:sine-wave"),
-    "Tz":               ("Mean Zero-Crossing Period","s",     None,                    "mdi:sine-wave"),
-    "MeanPeriod":       ("Mean Wave Period",         "s",     None,                    "mdi:sine-wave"),
-    "PeakPeriod":       ("Peak Wave Period",         "s",     None,                    "mdi:sine-wave"),
-    "MeanDirection":    ("Mean Wave Direction",      "°",     None,                    "mdi:compass-rose"),
-    "WaveDirection":    ("Wave Direction",           "°",     None,                    "mdi:compass-rose"),
-    "HarmonicMean":     ("Harmonic Mean Period",     "s",     None,                    "mdi:sine-wave"),
-    # Misc
-    "Visibility":       ("Visibility",              "km",    None,                    "mdi:eye"),
-    "Humidity":         ("Relative Humidity",       "%",     "humidity",              "mdi:water-percent"),
+    "height":       ("Significant Wave Height", "m",    None,                   "mdi:waves"),
+    "period":       ("Wave Peak Period",        "s",    None,                   "mdi:sine-wave"),
+    "waveDir":      ("Wave Direction",          "°",    None,                   "mdi:compass-rose"),
+
+    # ── Legacy / alternative column names (other buoy CSV variants) ──────────
+    "AtmPressure":  ("Atmospheric Pressure",    "hPa",  "atmospheric_pressure", "mdi:gauge"),
+    "WindSpeed":    ("Wind Speed",              "kn",   "wind_speed",           "mdi:weather-windy"),
+    "WindGust":     ("Wind Gust",               "kn",   "wind_speed",           "mdi:weather-windy"),
+    "WindDirection":("Wind Direction",          "°",    None,                   "mdi:compass-rose"),
+    "Gust_Dir":     ("Wind Gust Direction",     "°",    None,                   "mdi:compass-rose"),
+    "AirTemperature":("Air Temperature",        "°C",   "temperature",          "mdi:thermometer"),
+    "AirTemp":      ("Air Temperature",         "°C",   "temperature",          "mdi:thermometer"),
+    "DewPoint":     ("Dew Point",               "°C",   "temperature",          "mdi:thermometer-water"),
+    "SeaTemperature":("Sea Temperature",        "°C",   "temperature",          "mdi:thermometer"),
+    "SeaTemp":      ("Sea Temperature",         "°C",   "temperature",          "mdi:thermometer"),
+    "Hm0":          ("Significant Wave Height", "m",    None,                   "mdi:waves"),
+    "Tp":           ("Wave Peak Period",        "s",    None,                   "mdi:sine-wave"),
+    "Tz":           ("Wave Mean Period",        "s",    None,                   "mdi:sine-wave"),
+    "MeanPeriod":   ("Wave Mean Period",        "s",    None,                   "mdi:sine-wave"),
+    "PeakPeriod":   ("Wave Peak Period",        "s",    None,                   "mdi:sine-wave"),
+    "MeanDirection":("Mean Wave Direction",     "°",    None,                   "mdi:compass-rose"),
+    "WaveDirection":("Wave Direction",          "°",    None,                   "mdi:compass-rose"),
+    "Humidity":     ("Relative Humidity",       "%",    "humidity",             "mdi:water-percent"),
+    "Visibility":   ("Visibility",              "km",   None,                   "mdi:eye"),
 }
