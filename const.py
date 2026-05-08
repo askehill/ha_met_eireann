@@ -7,9 +7,10 @@ BASE_URL = "https://www.met.ie/forecasts/marine-inland-lakes/buoys/download/"
 
 DEFAULT_BUOY_ID = "M2"
 DEFAULT_NAME = "Met.ie Buoy"
-DEFAULT_SCAN_INTERVAL = 3600  # seconds (1 hour)
+DEFAULT_UPDATE_INTERVAL = 3600  # seconds (1 hour)
 
 CONF_BUOY_ID = "buoy_id"
+CONF_UPDATE_INTERVAL = "update_interval"  # custom key — avoids clash with HA's reserved 'scan_interval'
 CONF_TIDE_PORT = "tide_port"
 
 DEFAULT_TIDE_UPDATE_INTERVAL = 300  # seconds (5 minutes) — pure local computation

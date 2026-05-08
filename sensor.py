@@ -13,7 +13,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import CONF_NAME, CONF_SCAN_INTERVAL
+from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -26,10 +26,11 @@ from homeassistant.helpers.update_coordinator import (
 from .const import (
     CONF_BUOY_ID,
     CONF_TIDE_PORT,
+    CONF_UPDATE_INTERVAL,
     DEFAULT_BUOY_ID,
     DEFAULT_NAME,
-    DEFAULT_SCAN_INTERVAL,
     DEFAULT_TIDE_UPDATE_INTERVAL,
+    DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     SENSOR_METADATA,
 )
@@ -45,7 +46,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
         vol.Optional(CONF_BUOY_ID, default=DEFAULT_BUOY_ID): cv.string,
         vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
-        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.positive_int,
+        vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): cv.positive_int,
         vol.Optional(CONF_TIDE_PORT): vol.In(list(PORTS.keys())),
     }
 )
@@ -67,11 +68,11 @@ async def async_setup_platform(
     """Set up Met.ie buoy (and optional tide) sensors from configuration.yaml."""
     buoy_id: str = config[CONF_BUOY_ID]
     platform_name: str = config[CONF_NAME]
-    scan_interval: int = config[CONF_SCAN_INTERVAL]
+    update_interval: int = config[CONF_UPDATE_INTERVAL]
     tide_port_key: str | None = config.get(CONF_TIDE_PORT)
 
     # ── Buoy sensors ────────────────────────────────────────────────────────
-    buoy_coordinator = MetIeBuoyCoordinator(hass, buoy_id, scan_interval)
+    buoy_coordinator = MetIeBuoyCoordinator(hass, buoy_id, update_interval)
     await buoy_coordinator.async_refresh()
 
     if buoy_coordinator.last_exception:
