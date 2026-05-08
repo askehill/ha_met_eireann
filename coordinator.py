@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import BASE_URL, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import BASE_URL, DEFAULT_UPDATE_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class MetIeBuoyCoordinator(DataUpdateCoordinator[dict[str, str]]):
         self,
         hass: HomeAssistant,
         buoy_id: str,
-        scan_interval: int = DEFAULT_SCAN_INTERVAL,
+        scan_interval: int = DEFAULT_UPDATE_INTERVAL,
     ) -> None:
         self.buoy_id = buoy_id
         self.url = f"{BASE_URL}{buoy_id}"
