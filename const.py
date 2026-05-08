@@ -10,6 +10,9 @@ DEFAULT_NAME = "Met.ie Buoy"
 DEFAULT_SCAN_INTERVAL = 3600  # seconds (1 hour)
 
 CONF_BUOY_ID = "buoy_id"
+CONF_TIDE_PORT = "tide_port"
+
+DEFAULT_TIDE_UPDATE_INTERVAL = 300  # seconds (5 minutes) — pure local computation
 
 # ---------------------------------------------------------------------------
 # Known column → (friendly name, unit_of_measurement, device_class, icon)

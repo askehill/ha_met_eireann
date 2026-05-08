@@ -1,8 +1,14 @@
 # Met Éireann Irish Sea Buoy — Home Assistant Custom Component
 
 Pulls the latest buoy observations from Met.ie's public CSV endpoint and
-exposes each measurement column as a Home Assistant sensor entity.  Data
-is refreshed once per hour (configurable).
+exposes each measurement column as a Home Assistant sensor entity.  Data is
+refreshed once per hour (configurable).
+
+Optionally adds **tidal prediction sensors** — height, state, and next
+high/low tide — computed locally using harmonic analysis with Admiralty Tide
+Table constants.  No extra API or internet access needed for tides.
+
+---
 
 ## Supported buoys
 
@@ -14,10 +20,11 @@ is refreshed once per hour (configurable).
 | M5 | Atlantic (west coast) |
 | M6 | Atlantic (west coast) |
 
+---
+
 ## Installation
 
-1. Copy the `met_ie_buoy/` folder into your Home Assistant
-   `<config>/custom_components/` directory:
+1. Copy all files into your Home Assistant `<config>/custom_components/met_ie_buoy/` directory:
 
    ```
    <config>/
@@ -27,7 +34,8 @@ is refreshed once per hour (configurable).
            ├── manifest.json
            ├── const.py
            ├── coordinator.py
-           └── sensor.py
+           ├── sensor.py
+           └── tides.py
    ```
 
 2. Add the following to your `configuration.yaml`:
@@ -36,16 +44,19 @@ is refreshed once per hour (configurable).
    sensor:
      - platform: met_ie_buoy
        buoy_id: M2
-       name: "M2 Buoy"        # optional — becomes the prefix for all sensor names
-       scan_interval: 3600    # optional — seconds between refreshes (default: 3600)
+       name: "M2 Buoy"        # optional — prefix for all sensor names
+       scan_interval: 3600    # optional — seconds between buoy refreshes (default: 3600)
+       tide_port: dublin      # optional — enables tide sensors (see ports below)
    ```
 
 3. Restart Home Assistant.
 
-## Sensors created
+---
+
+## Buoy sensors
 
 The integration reads the CSV headers on first load and creates one sensor per
-measurement column.  Typical sensors for the M2 buoy include:
+measurement column.  Typical sensors for the M2 buoy:
 
 | Entity ID | Description | Unit |
 |-----------|-------------|------|
@@ -60,22 +71,49 @@ measurement column.  Typical sensors for the M2 buoy include:
 | `sensor.m2_buoy_atmospheric_pressure` | hPa | hPa |
 | `sensor.m2_buoy_dew_point` | °C | °C |
 
-> The exact sensors depend on what the CSV currently contains.  Any column
-> not listed in `const.py → SENSOR_METADATA` will still get a sensor — it
-> just won't have units or a device class attached.
+Any column not listed in `const.py → SENSOR_METADATA` still gets a sensor —
+it just won't have units or a device class attached.
 
-## Attributes
-
-Every sensor carries two extra attributes:
-
+Every buoy sensor carries two extra attributes:
 - **`buoy_id`** — the buoy identifier (e.g. `M2`)
-- **`observation_time`** — the timestamp of the reading, taken from the
-  `time` / `date` column of the CSV
+- **`observation_time`** — timestamp of the reading from the CSV `time` column
 
-## Using in automations / Lovelace
+---
+
+## Tide sensors
+
+When `tide_port` is set, four additional sensors are created (refreshed every
+5 minutes using local harmonic computation — no network request):
+
+| Sensor | State | Unit | Key attributes |
+|--------|-------|------|----------------|
+| `… Tide Height` | Current predicted height above Chart Datum | m | `tide_state`, `port`, `mhws`, `mlws` |
+| `… Tide State` | `Rising` or `Falling` | — | `height_m`, `port` |
+| `… Tide Next High` | Minutes until next high tide | min | `high_tide_time`, `high_tide_height` |
+| `… Tide Next Low` | Minutes until next low tide | min | `low_tide_time`, `low_tide_height` |
+
+### Supported tide ports
+
+| Key | Port |
+|-----|------|
+| `dublin` | Dublin Port |
+| `dun_laoghaire` | Dún Laoghaire |
+| `cork` | Cork Harbour (Cobh) |
+| `galway` | Galway |
+| `westport` | Westport |
+| `sligo` | Sligo |
+
+> **Accuracy**: ±15 cm height, ±10 min timing (typical).  Uses a 5-constituent
+> harmonic model (M2, S2, N2, K1, O1) with Admiralty Tide Table constants.
+> Nodal corrections are not applied, so accuracy degrades slightly near the
+> extremes of the 18.6-year nodal cycle.
+
+---
+
+## Automation examples
 
 ```yaml
-# Example: alert when significant wave height exceeds 4 m
+# Alert when wave height exceeds 4 m
 automation:
   - alias: "High waves warning"
     trigger:
@@ -85,13 +123,32 @@ automation:
     action:
       - service: notify.mobile_app_your_phone
         data:
-          message: "M2 buoy: wave height {{ states('sensor.m2_buoy_significant_wave_height') }} m"
+          message: >
+            M2 buoy: wave height {{ states('sensor.m2_buoy_significant_wave_height') }} m
+
+# Morning tide briefing
+  - alias: "Morning tide briefing"
+    trigger:
+      - platform: time
+        at: "07:30:00"
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          message: >
+            Tide is {{ states('sensor.m2_buoy_tide_state') | lower }},
+            currently {{ states('sensor.m2_buoy_tide_height') }} m.
+            Next high in {{ states('sensor.m2_buoy_tide_next_high') }} min
+            ({{ state_attr('sensor.m2_buoy_tide_next_high', 'high_tide_height') }} m).
 ```
+
+---
 
 ## Troubleshooting
 
 - Check **Settings → System → Logs** for lines containing `met_ie_buoy`.
-- If no sensors appear after restart, the first CSV fetch may have failed —
+- If no buoy sensors appear after restart, the first CSV fetch likely failed —
   look for `UpdateFailed` errors in the logs.
 - Make sure your Home Assistant instance has outbound internet access to
-  `www.met.ie`.
+  `www.met.ie` (only needed for buoy data, not tides).
+- If tide times look wrong by a fixed offset, check that your HA timezone is
+  set correctly — tide times are returned as UTC and converted by the frontend.
