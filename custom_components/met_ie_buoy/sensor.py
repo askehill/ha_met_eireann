@@ -146,7 +146,7 @@ async def async_setup_platform(
             TideForecastSensor(tide_coordinator, tide_prefix, buoy_id, tide_port_key),
             SwimConditionSensor(
                 tide_coordinator, buoy_coordinator,
-                tide_prefix, buoy_id, tide_port_key,
+                platform_name, buoy_id, tide_port_key,
                 swim_wave_threshold,
             ),
         ]
@@ -494,7 +494,7 @@ class TideForecastSensor(_TideSensorBase):
     def __init__(self, coordinator, prefix, buoy_id, port_key):
         super().__init__(
             coordinator, prefix, buoy_id, port_key,
-            suffix="Tide Forecast", unique_suffix="forecast",
+            suffix="Forecast", unique_suffix="forecast",
         )
 
     @property

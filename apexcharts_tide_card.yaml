@@ -8,7 +8,7 @@
 #   Paste this into a new card in your Lovelace dashboard
 #   (Edit dashboard → Add card → Manual card).
 #
-#   Replace "m2_buoy" in the entity IDs if you used a different name: prefix.
+#   Replace "m2_buoy" in the entity IDs if you used a different name prefix.
 #   e.g. if your config has  name: "Irish Sea Buoy"  the entity will be
 #        sensor.irish_sea_buoy_tide_forecast
 #
@@ -30,7 +30,7 @@ header:
 graph_span: 72h
 
 span:
-  start: now
+  start: hour
 
 now:
   show: true
@@ -40,6 +40,20 @@ now:
 apex_config:
   chart:
     height: 220
+  # markers.size is per-series: 0 = no dots on curve, 7 = dots on high/low series
+  markers:
+    size: [0, 7, 7]
+  # dataLabels show height values; series 0 (curve) suppressed via formatter
+  dataLabels:
+    enabled: true
+    formatter: |
+      EVAL:function(val, opts) {
+        if (opts.seriesIndex === 0) return '';
+        return val.toFixed(2) + ' m';
+      }
+    offsetY: -10
+    style:
+      fontSize: "11px"
   xaxis:
     labels:
       datetimeFormatter:
@@ -69,60 +83,33 @@ series:
     show:
       legend_value: false
       in_header: true
-      header_color_threshold:
-        - value: 0
-          color: "#1565C0"
     unit: m
     data_generator: |
       return entity.attributes.forecast.map(e => {
         return [new Date(e.t).getTime(), e.h];
       });
 
-  # ── High tide peaks ────────────────────────────────────────────────────────
+  # ── High tide peaks — line with stroke_width 0 renders as dots only ────────
   - entity: sensor.m2_buoy_tide_forecast
     name: High Tide
     color: "#E53935"
-    type: scatter
+    type: line
     stroke_width: 0
     show:
       legend_value: false
-    apex_config:
-      markers:
-        size: 6
-        shape: circle
-      dataLabels:
-        enabled: true
-        formatter: |
-          EVAL:function(val) { return val.toFixed(2) + "m"; }
-        offsetY: -10
-        style:
-          fontSize: "11px"
-          colors: ["#E53935"]
     data_generator: |
       return entity.attributes.upcoming_highs.map(e => {
         return [new Date(e.time).getTime(), e.height];
       });
 
-  # ── Low tide troughs ───────────────────────────────────────────────────────
+  # ── Low tide troughs ────────────────────────────────────────────────────────
   - entity: sensor.m2_buoy_tide_forecast
     name: Low Tide
     color: "#43A047"
-    type: scatter
+    type: line
     stroke_width: 0
     show:
       legend_value: false
-    apex_config:
-      markers:
-        size: 6
-        shape: circle
-      dataLabels:
-        enabled: true
-        formatter: |
-          EVAL:function(val) { return val.toFixed(2) + "m"; }
-        offsetY: 14
-        style:
-          fontSize: "11px"
-          colors: ["#43A047"]
     data_generator: |
       return entity.attributes.upcoming_lows.map(e => {
         return [new Date(e.time).getTime(), e.height];
