@@ -10,7 +10,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "custom_components", "met_ie_buoy"))
+sys.path.insert(0, os.path.dirname(__file__))  # homeassistant stub
 
 from coordinator import MetIeBuoyCoordinator
 from homeassistant.helpers.update_coordinator import UpdateFailed  # type: ignore

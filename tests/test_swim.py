@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "custom_components", "met_ie_buoy"))
 
 from const import SWIM_TIDE_WINDOW_MINUTES
 

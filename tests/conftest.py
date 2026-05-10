@@ -5,8 +5,11 @@ from datetime import datetime, timezone
 
 import pytest
 
-# Make the repo root importable without installing the package
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Add the component source directory so integration modules can be imported
+# directly (e.g. `import coordinator`, `import tides`) without HA being installed.
+_REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
+_COMPONENT_DIR = os.path.join(_REPO_ROOT, "custom_components", "met_ie_buoy")
+sys.path.insert(0, _COMPONENT_DIR)
 
 # Make the tests/ dir first on the path so our homeassistant stub is found
 # before any real homeassistant package (which likely isn't installed).
