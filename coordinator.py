@@ -11,7 +11,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import BASE_URL, DEFAULT_UPDATE_INTERVAL, DOMAIN
+try:
+    from .const import BASE_URL, DEFAULT_UPDATE_INTERVAL, DOMAIN
+except ImportError:
+    from const import BASE_URL, DEFAULT_UPDATE_INTERVAL, DOMAIN  # type: ignore[no-redef]
 
 _LOGGER = logging.getLogger(__name__)
 

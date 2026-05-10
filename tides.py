@@ -238,20 +238,29 @@ class TidalPredictor:
 
     def find_extrema(self, from_dt: datetime, count: int = 6) -> list[TidalExtremum]:
         """
-        Return the next `count` tidal extrema after from_dt, alternating
-        high / low.  Searches up to ~40 hours ahead (covers >3 M2 cycles).
+        Return the next `count` tidal extrema after from_dt.
+
+        The scan window scales with count so that large values (e.g. count=12
+        for a 3-day forecast) always find enough extrema.  Each M2 half-cycle
+        is ~6.2 hours, so count extrema need roughly count * 7 hours of search
+        space; we add a floor of 48 hours for safety.
         """
         from_dt = from_dt.astimezone(timezone.utc)
 
-        # Coarse scan: 10-minute samples over 40 hours
+        # Scale search horizon with count (minimum 48 h)
+        horizon_hours = max(48, count * 7)
+        n_steps = (horizon_hours * 60) // 10 + 1   # 10-minute steps
+
         step = timedelta(minutes=10)
         samples: list[tuple[datetime, float]] = []
         t = from_dt
-        for _ in range(241):   # 241 × 10 min ≈ 40 h
+        for _ in range(n_steps):
             samples.append((t, self.height(t)))
             t += step
 
         extrema: list[TidalExtremum] = []
+        min_gap = timedelta(hours=4)   # minimum spacing between same-kind extrema
+
         for i in range(1, len(samples) - 1):
             t_prev, h_prev = samples[i - 1]
             t_curr, h_curr = samples[i]
@@ -260,13 +269,22 @@ class TidalPredictor:
             is_high = (h_curr >= h_prev) and (h_curr >= h_next) and (h_curr > h_prev or h_curr > h_next)
             is_low  = (h_curr <= h_prev) and (h_curr <= h_next) and (h_curr < h_prev or h_curr < h_next)
 
-            if is_high or is_low:
-                refined_t = self._refine_extremum(t_prev, t_next, find_max=is_high)
-                refined_h = self.height(refined_t)
-                kind = "high" if is_high else "low"
-                extrema.append(TidalExtremum(refined_t, round(refined_h, 2), kind))
-                if len(extrema) >= count:
-                    break
+            if not (is_high or is_low):
+                continue
+
+            kind = "high" if is_high else "low"
+
+            # Deduplicate: skip if we already have a same-kind extremum too close in time
+            if extrema and extrema[-1].kind == kind:
+                if (t_curr - extrema[-1].time) < min_gap:
+                    continue
+
+            refined_t = self._refine_extremum(t_prev, t_next, find_max=is_high)
+            refined_h = self.height(refined_t)
+            extrema.append(TidalExtremum(refined_t, round(refined_h, 2), kind))
+
+            if len(extrema) >= count:
+                break
 
         return extrema
 
@@ -303,13 +321,33 @@ class TidalPredictor:
     # State summary
     # ------------------------------------------------------------------
 
+    def forecast_curve(
+        self, from_dt: datetime, hours: int = 72, interval_minutes: int = 30
+    ) -> list[dict]:
+        """
+        Return a list of {t, h} dicts for plotting a tide curve.
+
+        t  — ISO 8601 UTC string (compact, for minimal attribute payload)
+        h  — height above Chart Datum rounded to 2 dp
+
+        Default: 144 points over 72 hours at 30-minute intervals (~7 KB).
+        """
+        from_dt = from_dt.astimezone(timezone.utc)
+        step = timedelta(minutes=interval_minutes)
+        points = []
+        t = from_dt
+        for _ in range((hours * 60) // interval_minutes + 1):
+            points.append({"t": t.isoformat(), "h": round(self.height(t), 2)})
+            t += step
+        return points
+
     def state(self, dt: datetime) -> dict:
         """
         Return a dict summarising the tidal state at dt.
 
         Keys:
-          height              float  metres above Chart Datum
-          state               str    "Rising" | "Falling"
+          height              float   metres above Chart Datum
+          state               str     "Rising" | "Falling"
           next_high_time      datetime (UTC) | None
           next_high_height    float | None
           next_low_time       datetime (UTC) | None
@@ -317,7 +355,10 @@ class TidalPredictor:
           minutes_to_high     int | None
           minutes_to_low      int | None
           minutes_since_high  int | None  (minutes since most recent past high)
-          port                str    port name
+          forecast            list[{t, h}]  72-hour curve at 30-min intervals
+          upcoming_highs      list[{time, height}]  next 6 high tides (~3 days)
+          upcoming_lows       list[{time, height}]  next 6 low tides  (~3 days)
+          port                str
           mhws                float  Mean High Water Springs (m CD)
           mlws                float  Mean Low Water Springs (m CD)
         """
@@ -325,21 +366,28 @@ class TidalPredictor:
         current_height = self.height(dt)
         rising = self._dheight_dt(dt) > 0
 
-        # Search window: start 7 hours back so we always capture the
-        # most recent past high as well as upcoming ones.
-        extrema = self.find_extrema(dt - timedelta(hours=7), count=8)
+        # Look back up to 7 hours to find the most recent past high tide
+        past_extrema = self.find_extrema(dt - timedelta(hours=7), count=3)
+        past_high: TidalExtremum | None = None
+        for ex in past_extrema:
+            if ex.time <= dt and ex.kind == "high":
+                past_high = ex
 
-        past_high:  TidalExtremum | None = None
+        # Look forward from now for 12 future extrema (6 highs + 6 lows ≈ 3 days)
+        future_extrema = self.find_extrema(dt, count=12)
         next_high:  TidalExtremum | None = None
         next_low:   TidalExtremum | None = None
-        for ex in extrema:
-            if ex.time <= dt:
-                if ex.kind == "high":
-                    past_high = ex   # keep updating — last one wins (most recent)
-            else:
-                if ex.kind == "high" and next_high is None:
+        upcoming_highs: list[TidalExtremum] = []
+        upcoming_lows:  list[TidalExtremum] = []
+
+        for ex in future_extrema:
+            if ex.kind == "high":
+                upcoming_highs.append(ex)
+                if next_high is None:
                     next_high = ex
-                elif ex.kind == "low" and next_low is None:
+            elif ex.kind == "low":
+                upcoming_lows.append(ex)
+                if next_low is None:
                     next_low = ex
 
         def _mins_to(ex: TidalExtremum | None) -> int | None:
@@ -347,6 +395,9 @@ class TidalPredictor:
 
         def _mins_since(ex: TidalExtremum | None) -> int | None:
             return None if ex is None else round((dt - ex.time).total_seconds() / 60)
+
+        def _extremum_dict(ex: TidalExtremum) -> dict:
+            return {"time": ex.time.isoformat(), "height": ex.height}
 
         return {
             "height":             current_height,
@@ -358,6 +409,9 @@ class TidalPredictor:
             "minutes_to_high":    _mins_to(next_high),
             "minutes_to_low":     _mins_to(next_low),
             "minutes_since_high": _mins_since(past_high),
+            "forecast":           self.forecast_curve(dt),
+            "upcoming_highs":     [_extremum_dict(e) for e in upcoming_highs[:6]],
+            "upcoming_lows":      [_extremum_dict(e) for e in upcoming_lows[:6]],
             "port":               self._port.name,
             "mhws":               self._port.mhws,
             "mlws":               self._port.mlws,

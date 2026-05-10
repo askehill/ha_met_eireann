@@ -143,6 +143,7 @@ async def async_setup_platform(
             TideNextHighTimeSensor(tide_coordinator, tide_prefix, buoy_id, tide_port_key),
             TideNextLowSensor(tide_coordinator, tide_prefix, buoy_id, tide_port_key),
             TideNextLowTimeSensor(tide_coordinator, tide_prefix, buoy_id, tide_port_key),
+            TideForecastSensor(tide_coordinator, tide_prefix, buoy_id, tide_port_key),
             SwimConditionSensor(
                 tide_coordinator, buoy_coordinator,
                 tide_prefix, buoy_id, tide_port_key,
@@ -467,6 +468,47 @@ class TideNextLowTimeSensor(_TideSensorBase):
         return {
             "low_tide_height": t.get("next_low_height"),
             "port":            t.get("port"),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Tide forecast sensor  (drives the ApexCharts card)
+# ---------------------------------------------------------------------------
+
+class TideForecastSensor(_TideSensorBase):
+    """
+    Exposes the 72-hour tide forecast as sensor attributes for charting.
+
+    State  : current tide height (m) — same value as TideHeightSensor.
+    Attributes:
+      forecast        list[{t, h}]           30-min curve over 72 hours
+      upcoming_highs  list[{time, height}]   next 6 high tides (~3 days)
+      upcoming_lows   list[{time, height}]   next 6 low tides  (~3 days)
+      port            str
+    """
+
+    _attr_icon = "mdi:chart-bell-curve"
+    _attr_native_unit_of_measurement = "m"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, prefix, buoy_id, port_key):
+        super().__init__(
+            coordinator, prefix, buoy_id, port_key,
+            suffix="Tide Forecast", unique_suffix="forecast",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        return self._tide.get("height")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        t = self._tide
+        return {
+            "forecast":       t.get("forecast", []),
+            "upcoming_highs": t.get("upcoming_highs", []),
+            "upcoming_lows":  t.get("upcoming_lows", []),
+            "port":           t.get("port"),
         }
 
 

@@ -1,0 +1,129 @@
+# Tide Forecast — ApexCharts Card for Home Assistant
+#
+# Requirements:
+#   - ApexCharts Card installed via HACS
+#     https://github.com/RomRider/apexcharts-card
+#
+# Usage:
+#   Paste this into a new card in your Lovelace dashboard
+#   (Edit dashboard → Add card → Manual card).
+#
+#   Replace "m2_buoy" in the entity IDs if you used a different name: prefix.
+#   e.g. if your config has  name: "Irish Sea Buoy"  the entity will be
+#        sensor.irish_sea_buoy_tide_forecast
+#
+# What it shows:
+#   - Smooth 72-hour tide curve (blue line)
+#   - High tide peaks marked with red dots + height labels
+#   - Low tide troughs marked with green dots + height labels
+#   - A vertical "Now" line
+# ─────────────────────────────────────────────────────────────────────────────
+
+type: custom:apexcharts-card
+
+header:
+  show: true
+  title: Tide Forecast — Dublin (next 3 days)
+  show_states: true
+  colorize_states: true
+
+graph_span: 72h
+
+span:
+  start: now
+
+now:
+  show: true
+  label: Now
+  color: "#FF6F00"
+
+apex_config:
+  chart:
+    height: 220
+  xaxis:
+    labels:
+      datetimeFormatter:
+        day: "EEE d MMM"
+        hour: "HH:mm"
+  yaxis:
+    min: 0
+    max: 5
+    tickAmount: 5
+    labels:
+      formatter: |
+        EVAL:function(val) { return val.toFixed(1) + " m"; }
+  tooltip:
+    x:
+      format: "EEE d MMM HH:mm"
+  legend:
+    show: true
+    position: bottom
+
+series:
+  # ── Tide curve ─────────────────────────────────────────────────────────────
+  - entity: sensor.m2_buoy_tide_forecast
+    name: Tide Height
+    color: "#1565C0"
+    stroke_width: 2
+    curve: smooth
+    show:
+      legend_value: false
+      in_header: true
+      header_color_threshold:
+        - value: 0
+          color: "#1565C0"
+    unit: m
+    data_generator: |
+      return entity.attributes.forecast.map(e => {
+        return [new Date(e.t).getTime(), e.h];
+      });
+
+  # ── High tide peaks ────────────────────────────────────────────────────────
+  - entity: sensor.m2_buoy_tide_forecast
+    name: High Tide
+    color: "#E53935"
+    type: scatter
+    stroke_width: 0
+    show:
+      legend_value: false
+    apex_config:
+      markers:
+        size: 6
+        shape: circle
+      dataLabels:
+        enabled: true
+        formatter: |
+          EVAL:function(val) { return val.toFixed(2) + "m"; }
+        offsetY: -10
+        style:
+          fontSize: "11px"
+          colors: ["#E53935"]
+    data_generator: |
+      return entity.attributes.upcoming_highs.map(e => {
+        return [new Date(e.time).getTime(), e.height];
+      });
+
+  # ── Low tide troughs ───────────────────────────────────────────────────────
+  - entity: sensor.m2_buoy_tide_forecast
+    name: Low Tide
+    color: "#43A047"
+    type: scatter
+    stroke_width: 0
+    show:
+      legend_value: false
+    apex_config:
+      markers:
+        size: 6
+        shape: circle
+      dataLabels:
+        enabled: true
+        formatter: |
+          EVAL:function(val) { return val.toFixed(2) + "m"; }
+        offsetY: 14
+        style:
+          fontSize: "11px"
+          colors: ["#43A047"]
+    data_generator: |
+      return entity.attributes.upcoming_lows.map(e => {
+        return [new Date(e.time).getTime(), e.height];
+      });
