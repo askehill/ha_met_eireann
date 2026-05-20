@@ -86,7 +86,19 @@ class MetIeBuoyCoordinator(DataUpdateCoordinator[dict[str, str]]):
             raise UpdateFailed(f"Failed to parse CSV for buoy {self.buoy_id}: {err}") from err
 
         if not rows:
-            raise UpdateFailed(f"No data rows found in CSV for buoy {self.buoy_id}")
+            if self.data:
+                _LOGGER.warning(
+                    "Buoy %s returned an empty CSV — keeping last known values until "
+                    "the server recovers",
+                    self.buoy_id,
+                )
+                return self.data  # stale-but-valid: sensors keep their last state
+            _LOGGER.warning(
+                "Buoy %s returned an empty CSV on first fetch — buoy sensors will "
+                "show as unknown until data arrives",
+                self.buoy_id,
+            )
+            return {}  # no prior data; don't raise so tide sensors can still load
 
         latest = rows[-1]  # most-recent reading is the last row
         _LOGGER.debug("Buoy %s latest reading: %s", self.buoy_id, latest)

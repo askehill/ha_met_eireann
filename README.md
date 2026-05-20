@@ -219,13 +219,20 @@ automation:
 ## Troubleshooting
 
 - Check **Settings → System → Logs** for lines containing `met_ie_buoy`.
-- If no buoy sensors appear after restart, the first CSV fetch likely failed —
-  look for `UpdateFailed` errors in the logs.
-- Make sure your Home Assistant instance has outbound internet access to
-  `www.met.ie` (only needed for buoy data, not tides).
+- **Tide sensors working but no buoy measurement sensors** — the buoy CSV was
+  empty or unreachable on the first fetch. The integration loads anyway and
+  will keep retrying; once the Met.ie server recovers, restart HA and the buoy
+  sensors will be discovered automatically.
+- **Buoy sensors showing stale values** — if the CSV comes back empty after
+  a successful fetch, sensors hold their last known values rather than going
+  unavailable. A warning is logged; values will refresh once fresh data arrives.
+- **All sensors unavailable** — a network or HTTP error on a subsequent poll
+  will mark buoy sensors unavailable until the next successful fetch. Check
+  that your Home Assistant instance has outbound internet access to `www.met.ie`
+  (only needed for buoy data — tide prediction is fully local).
 - If tide times look wrong by a fixed offset, check that your HA timezone is
   set correctly — tide times are returned as UTC and converted by the frontend.
 - If the swim condition shows `Moderate` when you expect `Good`, check whether
   the buoy is currently reporting wave data — `Moderate` means the tide is
-  right but no wave height is available yet. This typically clears once the
-  first hourly fetch completes.
+  right but no wave height is available yet. This clears once fresh buoy data
+  arrives.

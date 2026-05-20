@@ -92,12 +92,17 @@ async def async_setup_platform(
     await buoy_coordinator.async_refresh()
 
     if buoy_coordinator.last_exception:
-        _LOGGER.error(
-            "Initial fetch for buoy %s failed: %s",
+        # Log but continue — tide sensors don't depend on buoy data and should
+        # always load. Buoy measurement sensors will be missing until the next
+        # HA restart once the server recovers (column discovery requires at
+        # least one successful fetch).
+        _LOGGER.warning(
+            "Initial fetch for buoy %s failed (%s) — buoy measurement sensors "
+            "will not be created until a successful fetch is possible. "
+            "Tide and swim sensors will still load.",
             buoy_id,
             buoy_coordinator.last_exception,
         )
-        return
 
     entities: list[SensorEntity] = []
     for column in buoy_coordinator.data or {}:
