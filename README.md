@@ -135,24 +135,26 @@ tide chart without additional API calls:
 ## Swim condition sensor
 
 When `tide_port` is set, a **Swim Condition** sensor is also created. It
-combines the buoy's wave height reading with the local tidal prediction to give
-a simple guide for open-water swimming:
+combines the buoy's wave height reading, the local tidal prediction, and
+sunrise/sunset times to give a simple guide for open-water swimming:
 
 | State | Meaning |
 |-------|---------|
-| `Good` | Within 90 minutes of high tide **and** wave height ≤ threshold |
-| `Poor` | Outside the tide window, or waves too high |
-| `Unknown` | Buoy hasn't reported a wave height yet |
+| `Good` | Daytime, within 90 minutes of high tide, **and** wave height ≤ threshold |
+| `Moderate` | Daytime, within 90 minutes of high tide, but buoy wave data is unavailable |
+| `Poor` | Outside the tide window, waves too high, or after dark |
 
 The 90-minute window and wave height threshold are based on typical Irish
 coastal swimming conditions — high tide brings clearer, deeper water inshore,
-while the threshold filters out rough days.
+while the threshold filters out rough days. The daylight requirement means the
+sensor will always return `Poor` at night regardless of tide or wave conditions.
 
 **Key attributes:**
 
 - **`reason`** — short explanation, e.g. `"Wave height 1.8 m exceeds threshold 1.0 m"`
 - **`wave_height_m`** — the raw wave height from the buoy
 - **`minutes_to_high`** / **`minutes_since_high`** — tide timing used in the calculation
+- **`is_daylight`** — `true` if the current time is between sunrise and sunset
 
 The wave height threshold defaults to `1.0 m` and can be overridden in
 `configuration.yaml` with `swim_wave_threshold`.
@@ -223,5 +225,7 @@ automation:
   `www.met.ie` (only needed for buoy data, not tides).
 - If tide times look wrong by a fixed offset, check that your HA timezone is
   set correctly — tide times are returned as UTC and converted by the frontend.
-- If the swim condition shows `Unknown`, the buoy hasn't yet reported a wave
-  height — this clears once the first hourly fetch completes.
+- If the swim condition shows `Moderate` when you expect `Good`, check whether
+  the buoy is currently reporting wave data — `Moderate` means the tide is
+  right but no wave height is available yet. This typically clears once the
+  first hourly fetch completes.

@@ -9,21 +9,13 @@
 #   (Edit dashboard → Add card → Manual card).
 #
 #   Replace "m2_buoy" in the entity IDs if you used a different name prefix.
-#   e.g. if your config has  name: "Irish Sea Buoy"  the entity will be
-#        sensor.irish_sea_buoy_tide_forecast
-#
-# What it shows:
-#   - Smooth 72-hour tide curve (blue line)
-#   - High tide peaks marked with red dots + height labels
-#   - Low tide troughs marked with green dots + height labels
-#   - A vertical "Now" line
 # ─────────────────────────────────────────────────────────────────────────────
 
 type: custom:apexcharts-card
 
 header:
   show: true
-  title: Tide Forecast — Dublin (next 3 days)
+  title: Tide Forecast — Dublin
   show_states: true
   colorize_states: true
 
@@ -35,63 +27,157 @@ span:
 now:
   show: true
   label: Now
-  color: "#FF6F00"
+  color: "#FF8F00"
 
 apex_config:
   chart:
-    height: 220
-  # markers.size is per-series: 0 = no dots on curve, 7 = dots on high/low series
+    height: 260
+    toolbar:
+      show: false
+    animations:
+      enabled: false
+  # fill.type as array: series 0 (daylight) = solid, series 1 (tide) = gradient
+  fill:
+    type: ["solid", "gradient", "solid", "solid"]
+    gradient:
+      shadeIntensity: 0
+      opacityFrom: 0.35
+      opacityTo: 0.02
+      stops: [0, 85, 100]
   markers:
-    size: [0, 7, 7]
-  # dataLabels show height values; series 0 (curve) suppressed via formatter
+    size: [0, 0, 9, 9]
+    strokeWidth: [0, 0, 2, 2]
+    strokeColors: ["transparent", "transparent", "#E53935", "#43A047"]
+    fillOpacity: [1, 1, 0, 0]
   dataLabels:
     enabled: true
     formatter: |
       EVAL:function(val, opts) {
-        if (opts.seriesIndex === 0) return '';
-        return val.toFixed(2) + ' m';
+        if (opts.seriesIndex < 2) return '';
+        return val ? val.toFixed(2) + ' m' : '';
       }
-    offsetY: -10
+    offsetY: -14
     style:
       fontSize: "11px"
+      fontWeight: "600"
+      colors: ["transparent", "transparent", "#E53935", "#43A047"]
+    background:
+      enabled: false
+  grid:
+    borderColor: "rgba(128,128,128,0.12)"
+    strokeDashArray: 4
+    xaxis:
+      lines:
+        show: false
+    yaxis:
+      lines:
+        show: true
   xaxis:
     labels:
       datetimeFormatter:
-        day: "EEE d MMM"
+        day: "ddd"
         hour: "HH:mm"
+      style:
+        fontSize: "11px"
+    axisBorder:
+      show: false
+    axisTicks:
+      show: false
   yaxis:
     min: 0
-    max: 5
+    max: 5.5
     tickAmount: 5
     labels:
       formatter: |
-        EVAL:function(val) { return val.toFixed(1) + " m"; }
+        EVAL:function(val) { return val.toFixed(1) + ' m'; }
+      style:
+        fontSize: "11px"
   tooltip:
     x:
-      format: "EEE d MMM HH:mm"
+      format: "ddd HH:mm"
+    y:
+      formatter: |
+        EVAL:function(val, opts) {
+          if (opts.seriesIndex === 0) return '';
+          return val ? val.toFixed(2) + ' m' : '';
+        }
   legend:
     show: true
     position: bottom
+    fontSize: "12px"
+    markers:
+      width: 8
+      height: 8
+      radius: 50
 
 series:
-  # ── Tide curve ─────────────────────────────────────────────────────────────
+  # ── Daylight band ──────────────────────────────────────────────────────────
+  # Rendered first so it sits behind the tide curve.
+  # Uses Paul Schlyter's solar algorithm for Dublin (53.33°N, 6.25°W).
+  # Each forecast point is set to 5.5 m (chart max) during daylight, 0 at night.
+  # stepline curve gives clean vertical transitions at sunrise/sunset.
   - entity: sensor.m2_buoy_tide_forecast
-    name: Tide Height
-    color: "#1565C0"
-    stroke_width: 2
-    curve: smooth
+    name: Daylight
+    color: "#FFD54F"
+    type: area
+    curve: stepline
+    stroke_width: 0
+    opacity: 0.13
     show:
       legend_value: false
+      in_header: false
+    data_generator: |
+      function sunTimes(date) {
+        const lat = 53.33, lng = -6.25;
+        const midnight = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+        const JD   = midnight / 86400000 + 2440587.5;
+        const n    = JD - 2451545.0;
+        const L    = ((280.46  + 0.9856474 * n) % 360 + 360) % 360;
+        const g    = ((357.528 + 0.9856003 * n) % 360 + 360) % 360;
+        const gr   = g * Math.PI / 180;
+        const lam  = L + 1.915 * Math.sin(gr) + 0.02 * Math.sin(2 * gr);
+        const lamr = lam * Math.PI / 180;
+        const epsr = (23.439 - 4e-7 * n) * Math.PI / 180;
+        const RA   = Math.atan2(Math.cos(epsr) * Math.sin(lamr), Math.cos(lamr)) * 180 / Math.PI;
+        const decr = Math.asin(Math.sin(epsr) * Math.sin(lamr));
+        const EqT  = 4 * (L - RA);
+        const noon = 12 - lng / 15 - EqT / 60;
+        const latr = lat * Math.PI / 180;
+        const cosH = (Math.sin(-0.01454) - Math.sin(latr) * Math.sin(decr))
+                     / (Math.cos(latr) * Math.cos(decr));
+        if (Math.abs(cosH) > 1)
+          return cosH < -1 ? { sunrise: midnight, sunset: midnight + 86400000 } : null;
+        const H = Math.acos(cosH) * 180 / Math.PI;
+        return { sunrise: midnight + (noon - H/15) * 3600000,
+                 sunset:  midnight + (noon + H/15) * 3600000 };
+      }
+      return entity.attributes.forecast.map(pt => {
+        const t = new Date(pt.t).getTime();
+        const s = sunTimes(new Date(t));
+        return [t, (s && t >= s.sunrise && t <= s.sunset) ? 5.5 : 0];
+      });
+
+  # ── Tide curve ─────────────────────────────────────────────────────────────
+  - entity: sensor.m2_buoy_tide_forecast
+    name: Tide height
+    color: "#1976D2"
+    type: area
+    stroke_width: 2.5
+    curve: smooth
+    opacity: 0.8
+    show:
+      legend_value: true
       in_header: true
     unit: m
+    float_precision: 2
     data_generator: |
       return entity.attributes.forecast.map(e => {
         return [new Date(e.t).getTime(), e.h];
       });
 
-  # ── High tide peaks — line with stroke_width 0 renders as dots only ────────
+  # ── High tide peaks ─────────────────────────────────────────────────────────
   - entity: sensor.m2_buoy_tide_forecast
-    name: High Tide
+    name: High tide
     color: "#E53935"
     type: line
     stroke_width: 0
@@ -104,7 +190,7 @@ series:
 
   # ── Low tide troughs ────────────────────────────────────────────────────────
   - entity: sensor.m2_buoy_tide_forecast
-    name: Low Tide
+    name: Low tide
     color: "#43A047"
     type: line
     stroke_width: 0

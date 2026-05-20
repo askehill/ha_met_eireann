@@ -38,7 +38,7 @@ from .const import (
     SWIM_TIDE_WINDOW_MINUTES,
 )
 from .coordinator import MetIeBuoyCoordinator
-from .tides import PORTS, TidalPredictor
+from .tides import PORTS, TidalPredictor, is_daylight
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -520,10 +520,11 @@ class SwimConditionSensor(_TideSensorBase):
     """
     Indicates whether conditions are good for a swim.
 
-    "Good"  — within SWIM_TIDE_WINDOW_MINUTES of high tide AND wave height
-              at or below the configured threshold.
-    "Poor"  — either condition not met.
-    "Unknown" — wave height data not yet available from the buoy.
+    "Good"     — daylight AND within SWIM_TIDE_WINDOW_MINUTES of high tide
+                 AND wave height at or below the configured threshold.
+    "Moderate" — daylight AND within SWIM_TIDE_WINDOW_MINUTES of high tide
+                 BUT wave height not yet available from the buoy.
+    "Poor"     — any other case (wrong tide, waves too high, or after dark).
 
     Reads tide data from the TideCoordinator and wave height from the
     MetIeBuoyCoordinator (the `height` CSV column).
@@ -580,44 +581,60 @@ class SwimConditionSensor(_TideSensorBase):
         just_passed = mins_since is not None and mins_since <= SWIM_TIDE_WINDOW_MINUTES
         return approaching or just_passed
 
+    @property
+    def _is_daylight(self) -> bool:
+        """True if the current time falls between sunrise and sunset at the tide port."""
+        from datetime import datetime, timezone as _tz
+        port = PORTS.get(self._port_key)
+        if port is None:
+            return True  # no port data — don't penalise
+        return is_daylight(datetime.now(_tz.utc), lat=port.lat, lon=port.lon)
+
     # ------------------------------------------------------------------
     # State
     # ------------------------------------------------------------------
 
     @property
     def native_value(self) -> str:
-        wave = self._wave_height
-
         tide_ok = self._near_high_tide
-        wave_ok = wave is not None and wave <= self._wave_threshold
+        day_ok  = self._is_daylight
+        wave    = self._wave_height
 
-        if wave is None:
-            return "Unknown"
-        return "Good" if (tide_ok and wave_ok) else "Poor"
+        if day_ok and tide_ok and wave is not None and wave <= self._wave_threshold:
+            return "Good"
+        if day_ok and tide_ok and wave is None:
+            return "Moderate"
+        return "Poor"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        t = self._tide
-        wave = self._wave_height
+        t          = self._tide
+        wave       = self._wave_height
         mins_to    = t.get("minutes_to_high")
         mins_since = t.get("minutes_since_high")
+        day_ok     = self._is_daylight
+        tide_ok    = self._near_high_tide
 
-        # Build a plain-English reason string
         reasons: list[str] = []
-        if not self._near_high_tide:
+        if not day_ok:
+            reasons.append("outside daylight hours")
+        if not tide_ok:
             if mins_to is not None:
-                reasons.append(f"high tide is {mins_to} min away (window is ±{SWIM_TIDE_WINDOW_MINUTES} min)")
+                reasons.append(
+                    f"high tide is {mins_to} min away (window is ±{SWIM_TIDE_WINDOW_MINUTES} min)"
+                )
         if wave is not None and wave > self._wave_threshold:
             reasons.append(f"waves {wave} m exceed threshold of {self._wave_threshold} m")
-        if wave is None:
-            reasons.append("wave height not available")
+        if wave is None and (day_ok and tide_ok):
+            reasons.append("wave height not yet available — conditions otherwise ok")
 
         return {
-            "near_high_tide":       self._near_high_tide,
-            "minutes_to_high_tide": mins_to,
+            "is_daylight":           day_ok,
+            "near_high_tide":        tide_ok,
+            "minutes_to_high_tide":  mins_to,
             "minutes_since_high_tide": mins_since,
-            "wave_height_m":        wave,
-            "wave_threshold_m":     self._wave_threshold,
-            "reason":               "; ".join(reasons) if reasons else "all conditions met",
-            "port":                 t.get("port"),
+            "wave_height_m":         wave,
+            "wave_threshold_m":      self._wave_threshold,
+            "reason":                "; ".join(reasons) if reasons else "all conditions met",
+            "port":                  t.get("port"),
         }
