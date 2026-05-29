@@ -366,15 +366,23 @@ class TidalPredictor:
         current_height = self.height(dt)
         rising = self._dheight_dt(dt) > 0
 
-        # Look back up to 7 hours to find the most recent past high tide
-        past_extrema = self.find_extrema(dt - timedelta(hours=7), count=3)
+        # Look back up to 7 hours to find the most recent past high tide.
+        # find_extrema should always return results for valid harmonic constants,
+        # but we guard against an empty list defensively.
+        try:
+            past_extrema = self.find_extrema(dt - timedelta(hours=7), count=3)
+        except Exception:  # noqa: BLE001
+            past_extrema = []
         past_high: TidalExtremum | None = None
         for ex in past_extrema:
             if ex.time <= dt and ex.kind == "high":
                 past_high = ex
 
         # Look forward from now for 12 future extrema (6 highs + 6 lows ≈ 3 days)
-        future_extrema = self.find_extrema(dt, count=12)
+        try:
+            future_extrema = self.find_extrema(dt, count=12)
+        except Exception:  # noqa: BLE001
+            future_extrema = []
         next_high:  TidalExtremum | None = None
         next_low:   TidalExtremum | None = None
         upcoming_highs: list[TidalExtremum] = []
@@ -437,6 +445,11 @@ def is_daylight(dt: datetime, lat: float, lon: float) -> bool:
         lon: Longitude in decimal degrees (positive = East).
     """
     dt = dt.astimezone(timezone.utc)
+    if dt.tzinfo is None:
+        raise ValueError(
+            f"is_daylight() requires a timezone-aware datetime; got naive datetime {dt!r}. "
+            "Pass datetime.now(timezone.utc) or attach tzinfo before calling."
+        )
     midnight_ts = datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc).timestamp()
     JD   = midnight_ts / 86400.0 + 2440587.5
     n    = JD - 2451545.0

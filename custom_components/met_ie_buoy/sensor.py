@@ -34,6 +34,7 @@ from .const import (
     DEFAULT_TIDE_UPDATE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    PRIMARY_COLUMNS,
     SENSOR_METADATA,
     SWIM_TIDE_WINDOW_MINUTES,
 )
@@ -104,10 +105,25 @@ async def async_setup_platform(
             buoy_coordinator.last_exception,
         )
 
+    # Use columns from the live CSV if available; fall back to the known primary
+    # column list so sensors are always registered at startup.  They will show
+    # as unknown until data arrives, then populate automatically — no restart
+    # needed once the server recovers.
+    discovered = {
+        col for col in (buoy_coordinator.data or {})
+        if col.lower() not in _SKIP_COLUMNS
+    }
+    columns_to_register = discovered or set(PRIMARY_COLUMNS)
+
+    if not discovered:
+        _LOGGER.warning(
+            "No columns discovered for buoy %s — pre-registering known sensors; "
+            "they will populate once the server returns data",
+            buoy_id,
+        )
+
     entities: list[SensorEntity] = []
-    for column in buoy_coordinator.data or {}:
-        if column.lower() in _SKIP_COLUMNS:
-            continue
+    for column in columns_to_register:
         entities.append(
             MetIeBuoySensor(
                 coordinator=buoy_coordinator,
@@ -117,14 +133,22 @@ async def async_setup_platform(
             )
         )
 
-    if not entities:
-        _LOGGER.warning("No sensor columns discovered for buoy %s", buoy_id)
-    else:
-        _LOGGER.info(
-            "Met.ie buoy %s: adding %d measurement sensors",
-            buoy_id,
-            len(entities),
+    # Always add a last-fetch timestamp sensor so users can see at a glance
+    # whether buoy data is current or stale.
+    entities.append(
+        BuoyLastFetchSensor(
+            coordinator=buoy_coordinator,
+            platform_name=platform_name,
+            buoy_id=buoy_id,
         )
+    )
+
+    _LOGGER.info(
+        "Met.ie buoy %s: adding %d measurement sensors (%s)",
+        buoy_id,
+        len(entities) - 1,  # exclude the last-fetch sensor from the count
+        "from live data" if discovered else "from fallback column list",
+    )
 
     # ── Tide sensors (optional) ─────────────────────────────────────────────
     if tide_port_key:
@@ -137,8 +161,16 @@ async def async_setup_platform(
         )
 
         tide_coordinator = TideCoordinator(hass, predictor, buoy_id, tide_port_key)
-        # First refresh is cheap (pure maths, no network)
-        await tide_coordinator.async_refresh()
+        try:
+            # First refresh is cheap (pure maths, no network)
+            await tide_coordinator.async_refresh()
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning(
+                "Initial tide calculation for port '%s' failed (%s) — "
+                "tide sensors will be unavailable until the next poll",
+                tide_port_key,
+                err,
+            )
 
         tide_prefix = f"{platform_name} Tide"
         entities += [
@@ -223,6 +255,45 @@ class MetIeBuoySensor(CoordinatorEntity[MetIeBuoyCoordinator], SensorEntity):
                 attrs["observation_time"] = data[time_key]
                 break
         return attrs
+
+
+# ---------------------------------------------------------------------------
+# Buoy last-fetch timestamp sensor
+# ---------------------------------------------------------------------------
+
+class BuoyLastFetchSensor(CoordinatorEntity[MetIeBuoyCoordinator], SensorEntity):
+    """Timestamp of the most recent successful data fetch from the buoy CSV.
+
+    Always shows as available so users can immediately see whether the buoy
+    has ever returned data, and how long ago the last good reading arrived.
+    Displays as 'unknown' until the first successful fetch.
+    """
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_should_poll = False
+    _attr_has_entity_name = False
+    _attr_icon = "mdi:clock-check-outline"
+
+    def __init__(
+        self,
+        coordinator: MetIeBuoyCoordinator,
+        platform_name: str,
+        buoy_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._buoy_id = buoy_id
+        self._attr_name = f"{platform_name} Last Updated"
+        self._attr_unique_id = f"{DOMAIN}_{buoy_id}_last_fetch"
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self.coordinator.last_fetch_time
+
+    @property
+    def available(self) -> bool:
+        # Always available — shows unknown rather than unavailable when no
+        # data has arrived yet, which is more useful for diagnosing outages.
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -589,11 +660,10 @@ class SwimConditionSensor(_TideSensorBase):
     @property
     def _is_daylight(self) -> bool:
         """True if the current time falls between sunrise and sunset at the tide port."""
-        from datetime import datetime, timezone as _tz
         port = PORTS.get(self._port_key)
         if port is None:
             return True  # no port data — don't penalise
-        return is_daylight(datetime.now(_tz.utc), lat=port.lat, lon=port.lon)
+        return is_daylight(datetime.now(timezone.utc), lat=port.lat, lon=port.lon)
 
     # ------------------------------------------------------------------
     # State

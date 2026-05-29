@@ -24,6 +24,16 @@ SWIM_TIDE_WINDOW_MINUTES     = 90    # minutes either side of high tide
 # metadata for recognised field names.  Unknown columns still get sensors,
 # just without units / device class.
 # ---------------------------------------------------------------------------
+# Primary column names confirmed from live Met.ie buoy CSVs.
+# Used as a fallback when the initial fetch returns no data, so sensors are
+# always registered at startup and auto-populate when the server recovers.
+PRIMARY_COLUMNS: tuple[str, ...] = (
+    "pressure",
+    "windSpeed", "windGust", "windDir", "windGustDir",
+    "temp", "dewPoint", "humidity", "seaTemp",
+    "height", "period", "waveDir",
+)
+
 SENSOR_METADATA: dict[str, tuple[str, str | None, str | None, str]] = {
     # ── Actual Met.ie CSV column names (confirmed from live data) ────────────
     # Atmospheric
