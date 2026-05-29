@@ -261,18 +261,22 @@ class MetIeBuoySensor(CoordinatorEntity[MetIeBuoyCoordinator], SensorEntity):
 # Buoy last-fetch timestamp sensor
 # ---------------------------------------------------------------------------
 
-class BuoyLastFetchSensor(CoordinatorEntity[MetIeBuoyCoordinator], SensorEntity):
+class BuoyLastFetchSensor(SensorEntity):
     """Timestamp of the most recent successful data fetch from the buoy CSV.
 
-    Always shows as available so users can immediately see whether the buoy
-    has ever returned data, and how long ago the last good reading arrived.
-    Displays as 'unknown' until the first successful fetch.
+    Deliberately does NOT inherit CoordinatorEntity — that base class ties
+    availability to coordinator.last_update_success, which would cause this
+    sensor to show as unavailable whenever the buoy fetch fails.  Instead we
+    wire up the coordinator listener ourselves so we control availability
+    independently and always show 'unknown' (not 'unavailable') before the
+    first good fetch arrives.
     """
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_should_poll = False
     _attr_has_entity_name = False
     _attr_icon = "mdi:clock-check-outline"
+    _attr_available = True
 
     def __init__(
         self,
@@ -280,20 +284,19 @@ class BuoyLastFetchSensor(CoordinatorEntity[MetIeBuoyCoordinator], SensorEntity)
         platform_name: str,
         buoy_id: str,
     ) -> None:
-        super().__init__(coordinator)
+        self._coordinator = coordinator
         self._buoy_id = buoy_id
         self._attr_name = f"{platform_name} Last Updated"
         self._attr_unique_id = f"{DOMAIN}_{buoy_id}_last_fetch"
 
-    @property
-    def native_value(self) -> datetime | None:
-        return self.coordinator.last_fetch_time
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            self._coordinator.async_add_listener(self.async_write_ha_state)
+        )
 
     @property
-    def available(self) -> bool:
-        # Always available — shows unknown rather than unavailable when no
-        # data has arrived yet, which is more useful for diagnosing outages.
-        return True
+    def native_value(self) -> datetime | None:
+        return self._coordinator.last_fetch_time
 
 
 # ---------------------------------------------------------------------------
