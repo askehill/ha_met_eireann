@@ -75,10 +75,16 @@ measurement column. Sensors for the M2 buoy (column names confirmed from live da
 | `sensor.m2_buoy_wave_peak_period` | `period` | Wave peak period | s |
 | `sensor.m2_buoy_wave_direction` | `waveDir` | Wave direction | ° |
 | `sensor.m2_buoy_sea_temperature` | `seaTemp` | Sea temperature | °C |
+| `sensor.m2_buoy_last_updated` | — | Timestamp of last successful data fetch | — |
 
 > Wind speeds are reported in **knots** by Met.ie marine stations.
 > Some columns (e.g. `windGust`, `waveDir`) may show `unknown` in HA when the
 > buoy hasn't reported a value for that reading.
+
+The **Last Updated** sensor is always available and shows `unknown` until the
+first successful fetch. It only advances when real fresh data arrives — it does
+not update when the integration falls back to cached values during an outage.
+Use it to confirm at a glance whether buoy data is current.
 
 Any column not listed in `const.py → SENSOR_METADATA` still gets a sensor —
 it just won't have units or a device class attached.
