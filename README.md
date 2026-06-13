@@ -49,7 +49,7 @@ Table constants. No extra API or internet access needed for tides.
        name: "M2 Buoy"           # optional — prefix for all sensor names
        update_interval: 3600     # optional — seconds between buoy refreshes (default: 3600)
        tide_port: dublin          # optional — enables tide sensors (see ports below)
-       swim_wave_threshold: 1.0  # optional — max wave height (m) for "Good" swim (default: 1.0)
+       swim_wave_threshold: 1.0  # optional — max wave height (m) for "Perfect" swim (default: 1.0)
    ```
 
 3. Restart Home Assistant.
@@ -146,14 +146,17 @@ sunrise/sunset times to give a simple guide for open-water swimming:
 
 | State | Meaning |
 |-------|---------|
-| `Good` | Daytime, within 90 minutes of high tide, **and** wave height ≤ threshold |
+| `Perfect` | Daytime, within 90 minutes of high tide, **and** wave height ≤ threshold (1.0 m default) |
+| `Choppy` | Daytime, within 90 minutes of high tide, **and** wave height between the threshold and 1.75 m |
+| `Rough` | Daytime, within 90 minutes of high tide, **and** wave height > 1.75 m |
 | `Moderate` | Daytime, within 90 minutes of high tide, but buoy wave data is unavailable |
-| `Poor` | Outside the tide window, waves too high, or after dark |
+| `Poor` | Outside the tide window, or after dark |
 
-The 90-minute window and wave height threshold are based on typical Irish
+The 90-minute window and wave height thresholds are based on typical Irish
 coastal swimming conditions — high tide brings clearer, deeper water inshore,
-while the threshold filters out rough days. The daylight requirement means the
-sensor will always return `Poor` at night regardless of tide or wave conditions.
+while the wave bands describe how rough the sea is. The daylight requirement
+means the sensor will always return `Poor` at night regardless of tide or wave
+conditions.
 
 **Key attributes:**
 
@@ -238,7 +241,7 @@ automation:
   (only needed for buoy data — tide prediction is fully local).
 - If tide times look wrong by a fixed offset, check that your HA timezone is
   set correctly — tide times are returned as UTC and converted by the frontend.
-- If the swim condition shows `Moderate` when you expect `Good`, check whether
+- If the swim condition shows `Moderate` when you expect `Perfect`, check whether
   the buoy is currently reporting wave data — `Moderate` means the tide is
   right but no wave height is available yet. This clears once fresh buoy data
   arrives.

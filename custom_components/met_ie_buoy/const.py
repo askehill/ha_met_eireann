@@ -15,7 +15,8 @@ CONF_TIDE_PORT = "tide_port"
 CONF_SWIM_WAVE_THRESHOLD = "swim_wave_threshold"
 
 DEFAULT_TIDE_UPDATE_INTERVAL = 300   # seconds (5 minutes) — pure local computation
-DEFAULT_SWIM_WAVE_THRESHOLD  = 1.0   # metres — Hm0 above this is considered too rough
+DEFAULT_SWIM_WAVE_THRESHOLD  = 1.0   # metres — Hm0 above this is "choppy" rather than "perfect"
+SWIM_ROUGH_WAVE_THRESHOLD    = 1.75  # metres — Hm0 above this is "rough"
 SWIM_TIDE_WINDOW_MINUTES     = 90    # minutes either side of high tide
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "custom_components", "met_ie_buoy"))
 
-from const import SWIM_TIDE_WINDOW_MINUTES
+from const import SWIM_ROUGH_WAVE_THRESHOLD, SWIM_TIDE_WINDOW_MINUTES
 
 # ---------------------------------------------------------------------------
 # Standalone swim condition function (mirrors SwimConditionSensor.native_value)
@@ -23,15 +23,20 @@ def swim_condition(
     wave_height: float | None,
     daylight: bool = True,
     threshold: float = 1.0,
+    rough_threshold: float = SWIM_ROUGH_WAVE_THRESHOLD,
     window: int = SWIM_TIDE_WINDOW_MINUTES,
 ) -> str:
-    """Return 'Good', 'Moderate', or 'Poor' given tide, wave, and daylight inputs."""
+    """Return 'Perfect', 'Choppy', 'Rough', 'Moderate', or 'Poor' given tide, wave, and daylight inputs."""
     near = (
         (minutes_to_high   is not None and minutes_to_high   <= window) or
         (minutes_since_high is not None and minutes_since_high <= window)
     )
-    if daylight and near and wave_height is not None and wave_height <= threshold:
-        return "Good"
+    if daylight and near and wave_height is not None:
+        if wave_height <= threshold:
+            return "Perfect"
+        if wave_height <= rough_threshold:
+            return "Choppy"
+        return "Rough"
     if daylight and near and wave_height is None:
         return "Moderate"
     return "Poor"
@@ -43,25 +48,25 @@ def swim_condition(
 
 class TestTideWindow:
     def test_exactly_at_window_boundary_approaching(self):
-        assert swim_condition(SWIM_TIDE_WINDOW_MINUTES, None, 0.5) == "Good"
+        assert swim_condition(SWIM_TIDE_WINDOW_MINUTES, None, 0.5) == "Perfect"
 
     def test_one_minute_inside_window_approaching(self):
-        assert swim_condition(SWIM_TIDE_WINDOW_MINUTES - 1, None, 0.5) == "Good"
+        assert swim_condition(SWIM_TIDE_WINDOW_MINUTES - 1, None, 0.5) == "Perfect"
 
     def test_one_minute_outside_window_approaching(self):
         assert swim_condition(SWIM_TIDE_WINDOW_MINUTES + 1, None, 0.5) == "Poor"
 
     def test_exactly_at_window_boundary_receding(self):
-        assert swim_condition(999, SWIM_TIDE_WINDOW_MINUTES, 0.5) == "Good"
+        assert swim_condition(999, SWIM_TIDE_WINDOW_MINUTES, 0.5) == "Perfect"
 
     def test_one_minute_inside_window_receding(self):
-        assert swim_condition(999, SWIM_TIDE_WINDOW_MINUTES - 1, 0.5) == "Good"
+        assert swim_condition(999, SWIM_TIDE_WINDOW_MINUTES - 1, 0.5) == "Perfect"
 
     def test_one_minute_outside_window_receding(self):
         assert swim_condition(999, SWIM_TIDE_WINDOW_MINUTES + 1, 0.5) == "Poor"
 
     def test_at_high_tide_itself(self):
-        assert swim_condition(0, 0, 0.5) == "Good"
+        assert swim_condition(0, 0, 0.5) == "Perfect"
 
     def test_far_from_high_tide(self):
         assert swim_condition(300, 250, 0.5) == "Poor"
@@ -76,23 +81,29 @@ class TestTideWindow:
 
 class TestWaveHeight:
     def test_exactly_at_threshold(self):
-        assert swim_condition(30, None, 1.0, threshold=1.0) == "Good"
+        assert swim_condition(30, None, 1.0, threshold=1.0) == "Perfect"
 
     def test_just_below_threshold(self):
-        assert swim_condition(30, None, 0.99, threshold=1.0) == "Good"
+        assert swim_condition(30, None, 0.99, threshold=1.0) == "Perfect"
 
     def test_just_above_threshold(self):
-        assert swim_condition(30, None, 1.01, threshold=1.0) == "Poor"
+        assert swim_condition(30, None, 1.01, threshold=1.0) == "Choppy"
+
+    def test_exactly_at_rough_threshold(self):
+        assert swim_condition(30, None, SWIM_ROUGH_WAVE_THRESHOLD, threshold=1.0) == "Choppy"
+
+    def test_just_above_rough_threshold(self):
+        assert swim_condition(30, None, SWIM_ROUGH_WAVE_THRESHOLD + 0.01, threshold=1.0) == "Rough"
 
     def test_very_rough_seas(self):
-        assert swim_condition(30, None, 3.5, threshold=1.0) == "Poor"
+        assert swim_condition(30, None, 3.5, threshold=1.0) == "Rough"
 
     def test_flat_calm(self):
-        assert swim_condition(30, None, 0.1, threshold=1.0) == "Good"
+        assert swim_condition(30, None, 0.1, threshold=1.0) == "Perfect"
 
     def test_custom_threshold(self):
-        assert swim_condition(30, None, 1.5, threshold=2.0) == "Good"
-        assert swim_condition(30, None, 2.1, threshold=2.0) == "Poor"
+        assert swim_condition(30, None, 1.5, threshold=2.0) == "Perfect"
+        assert swim_condition(30, None, 2.1, threshold=2.0, rough_threshold=2.5) == "Choppy"
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +120,7 @@ class TestDaylight:
         assert swim_condition(30, None, None, daylight=False) == "Poor"
 
     def test_good_with_daylight(self):
-        assert swim_condition(30, None, 0.5, daylight=True) == "Good"
+        assert swim_condition(30, None, 0.5, daylight=True) == "Perfect"
 
     def test_night_rough_seas_is_poor(self):
         assert swim_condition(30, None, 2.0, daylight=False) == "Poor"
@@ -144,13 +155,13 @@ class TestModerate:
 
 class TestCombinedConditions:
     def test_good_requires_all_three(self):
-        assert swim_condition(30, None, 0.5, daylight=True)  == "Good"    # all met
-        assert swim_condition(30, None, 1.5, daylight=True)  == "Poor"    # waves bad
-        assert swim_condition(300, None, 0.5, daylight=True) == "Poor"    # tide bad
-        assert swim_condition(30, None, 0.5, daylight=False) == "Poor"    # dark
+        assert swim_condition(30, None, 0.5, daylight=True)  == "Perfect"  # all met
+        assert swim_condition(30, None, 1.5, daylight=True)  == "Choppy"   # waves choppy
+        assert swim_condition(300, None, 0.5, daylight=True) == "Poor"     # tide bad
+        assert swim_condition(30, None, 0.5, daylight=False) == "Poor"     # dark
 
     def test_near_high_tide_rough_seas(self):
-        assert swim_condition(10, None, 2.0, daylight=True, threshold=1.0) == "Poor"
+        assert swim_condition(10, None, 2.0, daylight=True, threshold=1.0) == "Rough"
 
     def test_calm_seas_wrong_tide(self):
         assert swim_condition(200, 200, 0.2, daylight=True) == "Poor"
@@ -180,7 +191,7 @@ class TestSwimWithRealTides:
             wave_height=0.4,
             daylight=True,
         )
-        assert result == "Good"
+        assert result == "Perfect"
 
     def test_poor_condition_at_low_tide(self):
         from datetime import datetime, timedelta, timezone

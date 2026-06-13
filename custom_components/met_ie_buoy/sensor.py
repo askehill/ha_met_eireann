@@ -36,6 +36,7 @@ from .const import (
     DOMAIN,
     PRIMARY_COLUMNS,
     SENSOR_METADATA,
+    SWIM_ROUGH_WAVE_THRESHOLD,
     SWIM_TIDE_WINDOW_MINUTES,
 )
 from .coordinator import MetIeBuoyCoordinator
@@ -599,8 +600,12 @@ class SwimConditionSensor(_TideSensorBase):
     """
     Indicates whether conditions are good for a swim.
 
-    "Good"     — daylight AND within SWIM_TIDE_WINDOW_MINUTES of high tide
-                 AND wave height at or below the configured threshold.
+    "Perfect"  — daylight AND within SWIM_TIDE_WINDOW_MINUTES of high tide
+                 AND wave height at or below the configured threshold (1.0 m default).
+    "Choppy"   — daylight AND within SWIM_TIDE_WINDOW_MINUTES of high tide
+                 AND wave height between the threshold and 1.75 m.
+    "Rough"    — daylight AND within SWIM_TIDE_WINDOW_MINUTES of high tide
+                 AND wave height above 1.75 m.
     "Moderate" — daylight AND within SWIM_TIDE_WINDOW_MINUTES of high tide
                  BUT wave height not yet available from the buoy.
     "Poor"     — any other case (wrong tide, waves too high, or after dark).
@@ -678,8 +683,12 @@ class SwimConditionSensor(_TideSensorBase):
         day_ok  = self._is_daylight
         wave    = self._wave_height
 
-        if day_ok and tide_ok and wave is not None and wave <= self._wave_threshold:
-            return "Good"
+        if day_ok and tide_ok and wave is not None:
+            if wave <= self._wave_threshold:
+                return "Perfect"
+            if wave <= SWIM_ROUGH_WAVE_THRESHOLD:
+                return "Choppy"
+            return "Rough"
         if day_ok and tide_ok and wave is None:
             return "Moderate"
         return "Poor"
@@ -701,8 +710,10 @@ class SwimConditionSensor(_TideSensorBase):
                 reasons.append(
                     f"high tide is {mins_to} min away (window is ±{SWIM_TIDE_WINDOW_MINUTES} min)"
                 )
-        if wave is not None and wave > self._wave_threshold:
-            reasons.append(f"waves {wave} m exceed threshold of {self._wave_threshold} m")
+        if wave is not None and wave > SWIM_ROUGH_WAVE_THRESHOLD:
+            reasons.append(f"waves {wave} m are rough (above {SWIM_ROUGH_WAVE_THRESHOLD} m)")
+        elif wave is not None and wave > self._wave_threshold:
+            reasons.append(f"waves {wave} m are choppy (above {self._wave_threshold} m)")
         if wave is None and (day_ok and tide_ok):
             reasons.append("wave height not yet available — conditions otherwise ok")
 
