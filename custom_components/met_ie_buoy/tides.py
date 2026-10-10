@@ -444,12 +444,12 @@ def is_daylight(dt: datetime, lat: float, lon: float) -> bool:
         lat: Latitude in decimal degrees (positive = North).
         lon: Longitude in decimal degrees (positive = East).
     """
-    dt = dt.astimezone(timezone.utc)
     if dt.tzinfo is None:
         raise ValueError(
             f"is_daylight() requires a timezone-aware datetime; got naive datetime {dt!r}. "
             "Pass datetime.now(timezone.utc) or attach tzinfo before calling."
         )
+    dt = dt.astimezone(timezone.utc)
     midnight_ts = datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc).timestamp()
     JD   = midnight_ts / 86400.0 + 2440587.5
     n    = JD - 2451545.0
@@ -463,7 +463,10 @@ def is_daylight(dt: datetime, lat: float, lon: float) -> bool:
 
     RA    = math.degrees(math.atan2(math.cos(eps_r) * math.sin(lam_r), math.cos(lam_r)))
     dec_r = math.asin(math.sin(eps_r) * math.sin(lam_r))
-    EqT   = 4.0 * (L - RA)                    # equation of time (minutes)
+    # Equation of time (minutes). atan2 returns RA in (-180, 180] but L is in
+    # [0, 360), so the difference must be wrapped to (-180, 180]; otherwise
+    # for L > 180 (autumn equinox to spring equinox) solar noon is off by 24 h.
+    EqT   = 4.0 * (((L - RA + 180.0) % 360.0) - 180.0)
     noon  = 12.0 - lon / 15.0 - EqT / 60.0   # solar noon (UTC hours)
 
     lat_r = math.radians(lat)

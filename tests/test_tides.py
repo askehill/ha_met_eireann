@@ -21,6 +21,7 @@ from tides import (
     TidalPredictor,
     _V0,
     _SPEEDS,
+    is_daylight,
 )
 
 # ---------------------------------------------------------------------------
@@ -326,3 +327,47 @@ class TestForecastCurve:
         curve = predictor().forecast_curve(REF)
         heights = [pt["h"] for pt in curve]
         assert max(heights) - min(heights) >= 2.0
+
+
+# ---------------------------------------------------------------------------
+# is_daylight — regression: equation-of-time wrap bug made every hour "dark"
+# between the autumn and spring equinoxes.
+# ---------------------------------------------------------------------------
+
+class TestIsDaylight:
+    DUBLIN = (53.342, -6.229)
+
+    def _hours(self, y, m, d):
+        day = datetime(y, m, d, tzinfo=timezone.utc)
+        return [
+            h for h in range(24)
+            if is_daylight(day + timedelta(hours=h, minutes=30), *self.DUBLIN)
+        ]
+
+    @pytest.mark.parametrize("month,day,lo,hi", [
+        (3, 1, 7, 17),     # late winter
+        (6, 21, 4, 20),    # summer solstice
+        (10, 10, 7, 17),   # October (was always dark)
+        (12, 21, 9, 15),   # winter solstice (was always dark)
+    ])
+    def test_daylight_window(self, month, day, lo, hi):
+        hrs = self._hours(2026, month, day)
+        assert hrs, "no daylight at all — equation-of-time wrap bug?"
+        assert (hrs[0], hrs[-1]) == (lo, hi)
+
+    def test_every_day_of_year_has_daylight(self):
+        d = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        for i in range(365):
+            day = d + timedelta(days=i)
+            assert any(
+                is_daylight(day + timedelta(hours=h), *self.DUBLIN) for h in range(24)
+            ), f"no daylight on {day.date()}"
+
+    def test_noon_is_day_midnight_is_night(self):
+        d = datetime(2026, 10, 10, tzinfo=timezone.utc)
+        assert is_daylight(d + timedelta(hours=12), *self.DUBLIN)
+        assert not is_daylight(d, *self.DUBLIN)
+
+    def test_naive_datetime_rejected(self):
+        with pytest.raises(ValueError):
+            is_daylight(datetime(2026, 10, 10, 12), *self.DUBLIN)
