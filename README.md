@@ -1,5 +1,7 @@
 # Met Éireann Irish Sea Buoy — Home Assistant Custom Component
 
+[![Tests](https://github.com/askehill/ha_met_eireann/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/askehill/ha_met_eireann/actions/workflows/tests.yml)
+
 Pulls the latest buoy observations from Met.ie's public CSV endpoint and
 exposes each measurement column as a Home Assistant sensor entity. Data is
 refreshed once per hour (configurable).
