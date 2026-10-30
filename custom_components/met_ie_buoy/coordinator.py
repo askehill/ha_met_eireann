@@ -12,9 +12,21 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 try:
-    from .const import BASE_URL, DEFAULT_UPDATE_INTERVAL, DOMAIN
+    from .const import (
+        BASE_URL,
+        DEFAULT_UPDATE_INTERVAL,
+        DOMAIN,
+        STUCK_CHECK_COLUMNS,
+        STUCK_VALUE_MIN_ROWS,
+    )
 except ImportError:
-    from const import BASE_URL, DEFAULT_UPDATE_INTERVAL, DOMAIN  # type: ignore[no-redef]
+    from const import (  # type: ignore[no-redef]
+        BASE_URL,
+        DEFAULT_UPDATE_INTERVAL,
+        DOMAIN,
+        STUCK_CHECK_COLUMNS,
+        STUCK_VALUE_MIN_ROWS,
+    )
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,6 +43,9 @@ class MetIeBuoyCoordinator(DataUpdateCoordinator[dict[str, str]]):
         self.buoy_id = buoy_id
         self.url = f"{BASE_URL}{buoy_id}"
         self.last_fetch_time: datetime | None = None  # UTC time of last real data fetch
+        # Stuck wave-sensor detection (see _update_stuck_state)
+        self.wave_stuck_rows: int = 0                 # length of the identical trailing run
+        self.wave_stuck_since: str | None = None      # CSV "time" of the first row in that run
 
         super().__init__(
             hass,
@@ -116,6 +131,64 @@ class MetIeBuoyCoordinator(DataUpdateCoordinator[dict[str, str]]):
             )
             return {}  # no prior data; don't raise so tide sensors can still load
 
+        self._update_stuck_state(rows)
+
         latest = rows[-1]  # most-recent reading is the last row
         _LOGGER.debug("Buoy %s latest reading: %s", self.buoy_id, latest)
         return latest
+
+    # ------------------------------------------------------------------
+    # Stuck-sensor detection
+    # ------------------------------------------------------------------
+
+    @property
+    def wave_data_stuck(self) -> bool:
+        """True when the buoy's wave sensor appears frozen.
+
+        The wave channel can freeze on the buoy while every other channel
+        (wind, pressure, temperature) keeps updating, so the feed still looks
+        fresh.  A frozen sensor repeats the same height AND period every hour.
+        """
+        return self.wave_stuck_rows >= STUCK_VALUE_MIN_ROWS
+
+    def _update_stuck_state(self, rows: list[dict[str, str]]) -> None:
+        """Measure how many trailing rows repeat the latest wave values exactly.
+
+        Requires every column in STUCK_CHECK_COLUMNS to be present and non-blank
+        in the latest row (so a CSV without both columns is never flagged), then
+        counts back through the rows while those values stay identical.
+        """
+        was_stuck = self.wave_data_stuck
+        run = 0
+        since: str | None = None
+
+        latest = rows[-1]
+        cols = [c for c in STUCK_CHECK_COLUMNS if c in latest]
+        if len(cols) == len(STUCK_CHECK_COLUMNS):
+            signature = tuple(latest[c] for c in cols)
+            if all(v not in ("", "NaN", "N/A", "null", "NULL") for v in signature):
+                for row in reversed(rows):
+                    if tuple(row.get(c) for c in cols) == signature:
+                        run += 1
+                        since = row.get("time")
+                    else:
+                        break
+
+        self.wave_stuck_rows = run
+        self.wave_stuck_since = since if self.wave_data_stuck else None
+
+        if self.wave_data_stuck and not was_stuck:
+            _LOGGER.warning(
+                "Buoy %s wave sensor looks stuck: %s have been identical (%s) for the "
+                "last %d readings (since %s). Wave height/period will be reported as "
+                "unknown and ignored by the swim sensor until the values change.",
+                self.buoy_id,
+                "/".join(cols),
+                "/".join(latest[c] for c in cols),
+                run,
+                since,
+            )
+        elif was_stuck and not self.wave_data_stuck:
+            _LOGGER.info(
+                "Buoy %s wave sensor is reporting changing values again", self.buoy_id
+            )

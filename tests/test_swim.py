@@ -1,8 +1,8 @@
 """
 Tests for swim condition logic.
 
-The core logic from SwimConditionSensor is extracted here as a standalone
-function so it can be tested without a Home Assistant fixture.
+Tests the production swim rules in swim.py (the same function
+SwimConditionSensor calls), with no Home Assistant fixture needed.
 """
 import sys
 import os
@@ -12,34 +12,9 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "custom_components", "met_ie_buoy"))
 
 from const import SWIM_ROUGH_WAVE_THRESHOLD, SWIM_TIDE_WINDOW_MINUTES
+from swim import ESTIMATE_MARKER, is_near_high_tide, swim_condition
 
-# ---------------------------------------------------------------------------
-# Standalone swim condition function (mirrors SwimConditionSensor.native_value)
-# ---------------------------------------------------------------------------
-
-def swim_condition(
-    minutes_to_high: int | None,
-    minutes_since_high: int | None,
-    wave_height: float | None,
-    daylight: bool = True,
-    threshold: float = 1.0,
-    rough_threshold: float = SWIM_ROUGH_WAVE_THRESHOLD,
-    window: int = SWIM_TIDE_WINDOW_MINUTES,
-) -> str:
-    """Return 'Perfect', 'Choppy', 'Rough', 'Moderate', or 'Poor' given tide, wave, and daylight inputs."""
-    near = (
-        (minutes_to_high   is not None and minutes_to_high   <= window) or
-        (minutes_since_high is not None and minutes_since_high <= window)
-    )
-    if daylight and near and wave_height is not None:
-        if wave_height <= threshold:
-            return "Perfect"
-        if wave_height <= rough_threshold:
-            return "Choppy"
-        return "Rough"
-    if daylight and near and wave_height is None:
-        return "Moderate"
-    return "Poor"
+# swim_condition is the production function (swim.py), used by SwimConditionSensor.
 
 
 # ---------------------------------------------------------------------------
@@ -228,3 +203,81 @@ class TestSwimWithRealTides:
             daylight=True,
         )
         assert result == "Moderate"
+
+
+# ---------------------------------------------------------------------------
+# Estimated wave height ("*" marker)
+# ---------------------------------------------------------------------------
+
+class TestEstimatedWaveMarker:
+    """When the wave height is the wind-based estimate, banded states get a '*'."""
+
+    def test_marker_is_an_asterisk(self):
+        assert ESTIMATE_MARKER == "*"
+
+    @pytest.mark.parametrize("wave, expected", [
+        (0.4, "Perfect*"),
+        (1.0, "Perfect*"),      # at the threshold
+        (1.01, "Choppy*"),
+        (1.75, "Choppy*"),      # at the rough threshold
+        (1.76, "Rough*"),
+        (2.4, "Rough*"),
+    ])
+    def test_estimated_states_are_starred(self, wave, expected):
+        assert swim_condition(30, None, wave, wave_is_estimate=True) == expected
+
+    @pytest.mark.parametrize("wave, expected", [
+        (0.4, "Perfect"), (1.4, "Choppy"), (2.4, "Rough"),
+    ])
+    def test_measured_states_are_not_starred(self, wave, expected):
+        assert swim_condition(30, None, wave, wave_is_estimate=False) == expected
+
+    def test_same_thresholds_apply_to_estimate_and_measurement(self):
+        for wave in (0.2, 1.0, 1.2, 1.75, 2.0):
+            measured = swim_condition(30, None, wave)
+            estimated = swim_condition(30, None, wave, wave_is_estimate=True)
+            assert estimated == measured + "*"
+
+    def test_poor_is_never_starred(self):
+        # Outside the tide window
+        assert swim_condition(300, 250, 0.4, wave_is_estimate=True) == "Poor"
+        # After dark
+        assert swim_condition(30, None, 0.4, daylight=False, wave_is_estimate=True) == "Poor"
+
+    def test_moderate_is_never_starred(self):
+        assert swim_condition(30, None, None, wave_is_estimate=True) == "Moderate"
+        assert swim_condition(30, None, None) == "Moderate"
+
+    def test_custom_threshold_with_estimate(self):
+        assert swim_condition(30, None, 1.3, threshold=1.5, wave_is_estimate=True) == "Perfect*"
+        assert swim_condition(30, None, 1.3, threshold=1.0, wave_is_estimate=True) == "Choppy*"
+
+    def test_marker_applies_on_the_receding_side_of_the_tide(self):
+        assert swim_condition(999, 45, 0.5, wave_is_estimate=True) == "Perfect*"
+
+    def test_oct_2026_stuck_buoy_scenario(self):
+        """Buoy frozen at 2.7 m, wind estimate 2.4 m: inside the tide window both are Rough."""
+        assert swim_condition(30, None, 2.4, wave_is_estimate=True) == "Rough*"
+
+    def test_default_threshold_matches_config_default(self):
+        from const import DEFAULT_SWIM_WAVE_THRESHOLD
+        assert swim_condition(30, None, DEFAULT_SWIM_WAVE_THRESHOLD) == "Perfect"
+
+
+class TestIsNearHighTide:
+    @pytest.mark.parametrize("to_high, since_high, expected", [
+        (SWIM_TIDE_WINDOW_MINUTES, None, True),
+        (SWIM_TIDE_WINDOW_MINUTES + 1, None, False),
+        (None, SWIM_TIDE_WINDOW_MINUTES, True),
+        (None, SWIM_TIDE_WINDOW_MINUTES + 1, False),
+        (0, 0, True),
+        (None, None, False),
+        (500, 45, True),
+        (45, 500, True),
+    ])
+    def test_window(self, to_high, since_high, expected):
+        assert is_near_high_tide(to_high, since_high) is expected
+
+    def test_custom_window(self):
+        assert is_near_high_tide(30, None, window=30) is True
+        assert is_near_high_tide(31, None, window=30) is False

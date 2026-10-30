@@ -19,6 +19,15 @@ DEFAULT_SWIM_WAVE_THRESHOLD  = 1.0   # metres — Hm0 above this is "choppy" rat
 SWIM_ROUGH_WAVE_THRESHOLD    = 1.75  # metres — Hm0 above this is "rough"
 SWIM_TIDE_WINDOW_MINUTES     = 90    # minutes either side of high tide
 
+# Stuck-sensor detection.  The buoy CSV holds roughly the last 25 hourly rows.
+# If every column in STUCK_CHECK_COLUMNS has an identical value across the most
+# recent STUCK_VALUE_MIN_ROWS rows, the wave sensor is treated as frozen.
+# Both columns must repeat together: wave height alone can legitimately sit at
+# the same 0.1 m value for 6+ hours in calm weather, but height AND period
+# staying identical is not plausible for a working wave sensor.
+STUCK_VALUE_MIN_ROWS = 6
+STUCK_CHECK_COLUMNS: tuple[str, ...] = ("height", "period")
+
 # ---------------------------------------------------------------------------
 # Known column → (friendly name, unit_of_measurement, device_class, icon)
 # The integration discovers columns dynamically; this dict provides nicer
@@ -39,9 +48,9 @@ SENSOR_METADATA: dict[str, tuple[str, str | None, str | None, str]] = {
     # ── Actual Met.ie CSV column names (confirmed from live data) ────────────
     # Atmospheric
     "pressure":     ("Atmospheric Pressure",    "hPa",  "atmospheric_pressure", "mdi:gauge"),
-    # Wind  (speeds reported in knots by Met.ie marine stations)
-    "windSpeed":    ("Wind Speed",              "kn",   "wind_speed",           "mdi:weather-windy"),
-    "windGust":     ("Wind Gust",               "kn",   "wind_speed",           "mdi:weather-windy"),
+    # Wind  (speeds are reported in km/h in the Met.ie buoy CSV)
+    "windSpeed":    ("Wind Speed",              "km/h",   "wind_speed",           "mdi:weather-windy"),
+    "windGust":     ("Wind Gust",               "km/h",   "wind_speed",           "mdi:weather-windy"),
     "windDir":      ("Wind Direction",          "°",    None,                   "mdi:compass-rose"),
     "windGustDir":  ("Wind Gust Direction",     "°",    None,                   "mdi:compass-rose"),
     # Temperature
@@ -56,8 +65,8 @@ SENSOR_METADATA: dict[str, tuple[str, str | None, str | None, str]] = {
 
     # ── Legacy / alternative column names (other buoy CSV variants) ──────────
     "AtmPressure":  ("Atmospheric Pressure",    "hPa",  "atmospheric_pressure", "mdi:gauge"),
-    "WindSpeed":    ("Wind Speed",              "kn",   "wind_speed",           "mdi:weather-windy"),
-    "WindGust":     ("Wind Gust",               "kn",   "wind_speed",           "mdi:weather-windy"),
+    "WindSpeed":    ("Wind Speed",              "km/h",   "wind_speed",           "mdi:weather-windy"),
+    "WindGust":     ("Wind Gust",               "km/h",   "wind_speed",           "mdi:weather-windy"),
     "WindDirection":("Wind Direction",          "°",    None,                   "mdi:compass-rose"),
     "Gust_Dir":     ("Wind Gust Direction",     "°",    None,                   "mdi:compass-rose"),
     "AirTemperature":("Air Temperature",        "°C",   "temperature",          "mdi:thermometer"),

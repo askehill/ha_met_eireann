@@ -36,11 +36,14 @@ from .const import (
     DOMAIN,
     PRIMARY_COLUMNS,
     SENSOR_METADATA,
+    STUCK_CHECK_COLUMNS,
     SWIM_ROUGH_WAVE_THRESHOLD,
     SWIM_TIDE_WINDOW_MINUTES,
 )
 from .coordinator import MetIeBuoyCoordinator
 from .tides import PORTS, TidalPredictor, is_daylight
+from .swim import is_near_high_tide, swim_condition
+from .waves import estimate_from_row, parse_number, supports_buoy
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -151,6 +154,21 @@ async def async_setup_platform(
         "from live data" if discovered else "from fallback column list",
     )
 
+    # Wind-based wave height estimate — only for buoys with a fetch table (M2).
+    if supports_buoy(buoy_id):
+        entities.append(
+            EstimatedWaveHeightSensor(
+                coordinator=buoy_coordinator,
+                platform_name=platform_name,
+                buoy_id=buoy_id,
+            )
+        )
+    else:
+        _LOGGER.debug(
+            "Met.ie buoy %s: no fetch table, estimated wave height sensor not created",
+            buoy_id,
+        )
+
     # ── Tide sensors (optional) ─────────────────────────────────────────────
     if tide_port_key:
         port = PORTS[tide_port_key]
@@ -239,6 +257,8 @@ class MetIeBuoySensor(CoordinatorEntity[MetIeBuoyCoordinator], SensorEntity):
     def native_value(self) -> float | str | None:
         if self.coordinator.data is None:
             return None
+        if self._is_stuck:
+            return None  # frozen wave sensor — don't present a stale value as live
         raw = self.coordinator.data.get(self._column)
         if raw is None or raw.strip() in ("", "NaN", "N/A", "null", "NULL"):
             return None
@@ -248,14 +268,83 @@ class MetIeBuoySensor(CoordinatorEntity[MetIeBuoyCoordinator], SensorEntity):
             return raw
 
     @property
+    def _is_stuck(self) -> bool:
+        """True if this is a wave column and the buoy's wave sensor looks frozen."""
+        return (
+            self._column in STUCK_CHECK_COLUMNS
+            and self.coordinator.wave_data_stuck
+        )
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
         attrs: dict[str, Any] = {"buoy_id": self._buoy_id}
+        if self._is_stuck:
+            attrs["data_quality"] = "stuck"
+            attrs["stuck_since"] = self.coordinator.wave_stuck_since
+            attrs["stuck_readings"] = self.coordinator.wave_stuck_rows
+            attrs["last_reported_value"] = data.get(self._column)
         for time_key in ("time", "Time", "date", "Date", "datetime", "Datetime"):
             if time_key in data:
                 attrs["observation_time"] = data[time_key]
                 break
         return attrs
+
+
+# ---------------------------------------------------------------------------
+# Estimated wave height (from wind speed + direction)
+# ---------------------------------------------------------------------------
+
+class EstimatedWaveHeightSensor(CoordinatorEntity[MetIeBuoyCoordinator], SensorEntity):
+    """Rough wave height estimated from the buoy's wind speed and direction.
+
+    A cross-check for (and fallback to) the buoy's own wave sensor, which can
+    freeze while the rest of the station keeps reporting.  See waves.py for the
+    model and its limitations (typically ±0.4 m).  Always an estimate — it never
+    replaces the measured Significant Wave Height sensor.
+    """
+
+    _attr_has_entity_name = False
+    _attr_should_poll = False
+    _attr_icon = "mdi:wave"
+    _attr_native_unit_of_measurement = "m"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: MetIeBuoyCoordinator,
+        platform_name: str,
+        buoy_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._buoy_id = buoy_id
+        self._attr_name = f"{platform_name} Estimated Wave Height"
+        self._attr_unique_id = f"{DOMAIN}_{buoy_id}_estimated_wave_height"
+
+    @property
+    def _estimate(self):
+        return estimate_from_row(self._buoy_id, self.coordinator.data or {})
+
+    @property
+    def native_value(self) -> float | None:
+        est = self._estimate
+        return est.height_m if est else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self.coordinator.data or {}
+        est = self._estimate
+        stuck = self.coordinator.wave_data_stuck
+        return {
+            "estimate": True,
+            "method": "fetch-limited wind-wave model (wind speed and direction only)",
+            "buoy_id": self._buoy_id,
+            "wind_speed_kmh": est.wind_speed_kmh if est else None,
+            "wind_direction_deg": est.wind_dir_deg if est else None,
+            "fetch_km": est.fetch_km if est else None,
+            "buoy_wave_height_m": None if stuck else parse_number(data.get("height")),
+            "buoy_wave_data_stuck": stuck,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -607,8 +696,12 @@ class SwimConditionSensor(_TideSensorBase):
     "Rough"    — daylight AND within SWIM_TIDE_WINDOW_MINUTES of high tide
                  AND wave height above 1.75 m.
     "Moderate" — daylight AND within SWIM_TIDE_WINDOW_MINUTES of high tide
-                 BUT wave height not yet available from the buoy.
-    "Poor"     — any other case (wrong tide, waves too high, or after dark).
+                 BUT no wave height at all (neither measured nor estimated).
+    "Poor"     — any other case (wrong tide or after dark).
+
+    If the buoy's wave reading is missing or stuck, the wind-based estimate is
+    used instead and the wave-banded states get a trailing "*" ("Perfect*",
+    "Choppy*", "Rough*").  Rules live in swim.py.
 
     Reads tide data from the TideCoordinator and wave height from the
     MetIeBuoyCoordinator (the `height` CSV column).
@@ -645,7 +738,13 @@ class SwimConditionSensor(_TideSensorBase):
 
     @property
     def _wave_height(self) -> float | None:
-        """Current significant wave height from the buoy CSV (metres)."""
+        """Current significant wave height from the buoy CSV (metres).
+
+        Returns None when the reading is missing or when the buoy's wave sensor
+        looks frozen (identical height and period for many consecutive hours).
+        """
+        if self._buoy_coordinator.wave_data_stuck:
+            return None
         data = self._buoy_coordinator.data or {}
         raw = data.get("height")
         if raw is None or str(raw).strip() in ("", "NaN", "N/A", "null", "NULL"):
@@ -656,14 +755,36 @@ class SwimConditionSensor(_TideSensorBase):
             return None
 
     @property
+    def _estimated_wave_height(self) -> float | None:
+        """Wind-based wave height estimate (m), or None if it can't be made."""
+        est = estimate_from_row(self._buoy_id, self._buoy_coordinator.data or {})
+        return est.height_m if est else None
+
+    @property
+    def _effective_wave(self) -> tuple[float | None, bool]:
+        """(wave height used for the swim call, whether it is the estimate).
+
+        The buoy's measured height is used whenever it is available.  If it is
+        missing or the buoy's wave sensor is stuck, fall back to the wind-based
+        estimate so the sensor can still give a (starred) answer.
+        """
+        measured = self._wave_height
+        if measured is not None:
+            return measured, False
+        estimated = self._estimated_wave_height
+        if estimated is not None:
+            return estimated, True
+        return None, False
+
+    @property
     def _near_high_tide(self) -> bool:
         """True if within SWIM_TIDE_WINDOW_MINUTES of the nearest high tide."""
         t = self._tide
-        mins_to    = t.get("minutes_to_high")
-        mins_since = t.get("minutes_since_high")
-        approaching = mins_to    is not None and mins_to    <= SWIM_TIDE_WINDOW_MINUTES
-        just_passed = mins_since is not None and mins_since <= SWIM_TIDE_WINDOW_MINUTES
-        return approaching or just_passed
+        return is_near_high_tide(
+            t.get("minutes_to_high"),
+            t.get("minutes_since_high"),
+            SWIM_TIDE_WINDOW_MINUTES,
+        )
 
     @property
     def _is_daylight(self) -> bool:
@@ -679,28 +800,29 @@ class SwimConditionSensor(_TideSensorBase):
 
     @property
     def native_value(self) -> str:
-        tide_ok = self._near_high_tide
-        day_ok  = self._is_daylight
-        wave    = self._wave_height
-
-        if day_ok and tide_ok and wave is not None:
-            if wave <= self._wave_threshold:
-                return "Perfect"
-            if wave <= SWIM_ROUGH_WAVE_THRESHOLD:
-                return "Choppy"
-            return "Rough"
-        if day_ok and tide_ok and wave is None:
-            return "Moderate"
-        return "Poor"
+        t = self._tide
+        wave, is_estimate = self._effective_wave
+        return swim_condition(
+            minutes_to_high=t.get("minutes_to_high"),
+            minutes_since_high=t.get("minutes_since_high"),
+            wave_height=wave,
+            daylight=self._is_daylight,
+            threshold=self._wave_threshold,
+            rough_threshold=SWIM_ROUGH_WAVE_THRESHOLD,
+            window=SWIM_TIDE_WINDOW_MINUTES,
+            wave_is_estimate=is_estimate,
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         t          = self._tide
-        wave       = self._wave_height
+        measured   = self._wave_height
+        wave, is_estimate = self._effective_wave
         mins_to    = t.get("minutes_to_high")
         mins_since = t.get("minutes_since_high")
         day_ok     = self._is_daylight
         tide_ok    = self._near_high_tide
+        stuck      = self._buoy_coordinator.wave_data_stuck
 
         reasons: list[str] = []
         if not day_ok:
@@ -710,20 +832,35 @@ class SwimConditionSensor(_TideSensorBase):
                 reasons.append(
                     f"high tide is {mins_to} min away (window is ±{SWIM_TIDE_WINDOW_MINUTES} min)"
                 )
+        wave_label = "estimated waves" if is_estimate else "waves"
         if wave is not None and wave > SWIM_ROUGH_WAVE_THRESHOLD:
-            reasons.append(f"waves {wave} m are rough (above {SWIM_ROUGH_WAVE_THRESHOLD} m)")
+            reasons.append(f"{wave_label} {wave} m are rough (above {SWIM_ROUGH_WAVE_THRESHOLD} m)")
         elif wave is not None and wave > self._wave_threshold:
-            reasons.append(f"waves {wave} m are choppy (above {self._wave_threshold} m)")
+            reasons.append(f"{wave_label} {wave} m are choppy (above {self._wave_threshold} m)")
+        if is_estimate:
+            why = "stuck" if stuck else "unavailable"
+            reasons.append(
+                f"* using wind-based estimate of {wave} m because the buoy wave reading is {why}"
+            )
         if wave is None and (day_ok and tide_ok):
-            reasons.append("wave height not yet available — conditions otherwise ok")
+            if stuck:
+                reasons.append(
+                    "buoy wave sensor appears stuck — wave height ignored, conditions otherwise ok"
+                )
+            else:
+                reasons.append("wave height not yet available — conditions otherwise ok")
 
         return {
-            "is_daylight":           day_ok,
-            "near_high_tide":        tide_ok,
-            "minutes_to_high_tide":  mins_to,
+            "is_daylight":             day_ok,
+            "near_high_tide":          tide_ok,
+            "minutes_to_high_tide":    mins_to,
             "minutes_since_high_tide": mins_since,
-            "wave_height_m":         wave,
-            "wave_threshold_m":      self._wave_threshold,
-            "reason":                "; ".join(reasons) if reasons else "all conditions met",
-            "port":                  t.get("port"),
+            "wave_height_m":           measured,
+            "wave_height_used_m":      wave,
+            "wave_height_is_estimate": is_estimate,
+            "estimated_wave_height_m": self._estimated_wave_height,
+            "wave_data_stuck":         stuck,
+            "wave_threshold_m":        self._wave_threshold,
+            "reason":                  "; ".join(reasons) if reasons else "all conditions met",
+            "port":                    t.get("port"),
         }

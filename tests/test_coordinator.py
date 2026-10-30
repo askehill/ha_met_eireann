@@ -153,3 +153,87 @@ class TestEmptyValues:
         csv = "pressure,height\n1015.0,1.2\n,\n"
         result = coordinator._parse_csv(csv)
         assert result["pressure"] == "1015.0"
+
+
+# ---------------------------------------------------------------------------
+# Stuck wave-sensor detection
+# ---------------------------------------------------------------------------
+
+FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
+
+
+def _read_fixture(name: str) -> str:
+    with open(os.path.join(FIXTURES, name), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _wave_csv(rows: list[tuple[str, str]]) -> str:
+    """Build a minimal CSV with time, height and period (and a varying pressure)."""
+    lines = ["ID,name,time,pressure,height,period"]
+    for i, (height, period) in enumerate(rows):
+        lines.append(f'{i},M2,"9 May {i}:00",{1010 + i},{height},{period}')
+    return "\n".join(lines) + "\n"
+
+
+class TestStuckWaveDetection:
+    def test_real_frozen_feed_is_detected(self, coordinator):
+        """Oct 2026 feed: 25 hours of height 2.7 / period 4.9 while wind etc. varied."""
+        result = coordinator._parse_csv(_read_fixture("m2_stuck_wave_oct2026.csv"))
+        assert coordinator.wave_data_stuck is True
+        assert coordinator.wave_stuck_rows == 25
+        assert coordinator.wave_stuck_since == "29 Oct 11:00"
+        # The raw data is still returned unchanged; sensors decide what to show
+        assert result["height"] == "2.7"
+        assert result["period"] == "4.9"
+
+    def test_real_healthy_feed_is_not_flagged(self, coordinator):
+        coordinator._parse_csv(_read_fixture("m2_normal_may2026.csv"))
+        assert coordinator.wave_data_stuck is False
+        assert coordinator.wave_stuck_since is None
+
+    def test_repeated_height_alone_is_not_stuck(self, coordinator):
+        """Real May data held height at 0.4 for 7 hours while the period still changed."""
+        rows = [("0.5", "3.5"), ("0.4", "3.4"), ("0.4", "3.5"), ("0.4", "3.6"),
+                ("0.4", "3.3"), ("0.4", "3.2"), ("0.4", "3.0"), ("0.4", "3.0")]
+        coordinator._parse_csv(_wave_csv(rows))
+        assert coordinator.wave_data_stuck is False
+
+    def test_threshold_boundary(self, coordinator):
+        from const import STUCK_VALUE_MIN_ROWS
+
+        below = [("1.0", "4.0"), ("1.1", "4.1")] + [("2.7", "4.9")] * (STUCK_VALUE_MIN_ROWS - 1)
+        coordinator._parse_csv(_wave_csv(below))
+        assert coordinator.wave_data_stuck is False
+
+        at = [("1.0", "4.0"), ("1.1", "4.1")] + [("2.7", "4.9")] * STUCK_VALUE_MIN_ROWS
+        coordinator._parse_csv(_wave_csv(at))
+        assert coordinator.wave_data_stuck is True
+        assert coordinator.wave_stuck_rows == STUCK_VALUE_MIN_ROWS
+
+    def test_recovers_when_values_change(self, coordinator):
+        frozen = [("2.7", "4.9")] * 8
+        coordinator._parse_csv(_wave_csv(frozen))
+        assert coordinator.wave_data_stuck is True
+
+        coordinator._parse_csv(_wave_csv(frozen + [("2.4", "5.1")]))
+        assert coordinator.wave_data_stuck is False
+        assert coordinator.wave_stuck_since is None
+
+    def test_missing_period_column_is_never_flagged(self, coordinator):
+        """Without both wave columns we cannot tell stuck from a calm sea."""
+        csv = "ID,name,time,pressure,height\n" + "\n".join(
+            f'{i},M2,"9 May {i}:00",{1010 + i},2.7' for i in range(10)
+        ) + "\n"
+        coordinator._parse_csv(csv)
+        assert coordinator.wave_data_stuck is False
+
+    def test_blank_wave_values_are_not_flagged(self, coordinator):
+        coordinator._parse_csv(_wave_csv([("", "")] * 10))
+        assert coordinator.wave_data_stuck is False
+
+    def test_empty_csv_keeps_previous_stuck_state(self, coordinator):
+        """Soft-failure on an empty CSV must not silently clear the stuck flag."""
+        coordinator.data = coordinator._parse_csv(_wave_csv([("2.7", "4.9")] * 8))
+        assert coordinator.wave_data_stuck is True
+        coordinator._parse_csv(HEADER_ONLY_CSV)
+        assert coordinator.wave_data_stuck is True
